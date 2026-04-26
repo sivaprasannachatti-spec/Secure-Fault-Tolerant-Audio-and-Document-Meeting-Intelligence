@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting AI Assistant</title>
+    <link rel="stylesheet" href="./css/style.css">
+    <script>
+        // Synchronous Auth Check to prevent page flashing
+        if (localStorage.getItem('isAuthenticated') === 'true') {
+            window.location.replace('./html/chat.html');
+        }
+    </script>
+</head>
+<body>
+    <!-- Define the neon gradient for SVGs -->
+    <svg style="width:0;height:0;position:absolute;" aria-hidden="true" focusable="false">
+      <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#6366f1" />
+        <stop offset="50%" stop-color="#a855f7" />
+        <stop offset="100%" stop-color="#ec4899" />
+      </linearGradient>
+    </svg>
+
+    <nav class="navbar">
+        <a href="index.html" class="logo">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+            MeetingAI
+        </a>
+        <div class="nav-links">
+            <a href="#features">Capabilities</a>
+            <a href="#">Security</a>
+            <a href="./html/login.html" class="btn-outline">Workspace</a>
+            <a href="./html/signup.html" class="btn-primary">Get Started</a>
+        </div>
+    </nav>
+
+    <main class="hero">
+        <div class="hero-content">
+            <div class="hero-badge">
+                <span></span> Meeting Analysis Platform
+            </div>
+            <h1 class="hero-title">Meetings decoded. Knowledge secured.</h1>
+            <p class="hero-subtitle">Upload your corporate audio and experience instantaneous intelligence. Extract action items, isolate department logic, and query your history entirely locally.</p>
+            <div class="hero-cta">
+                <a href="./html/login.html" class="btn-primary">Open Workspace</a>
+                <a href="#features" class="btn-outline">Explore Capabilities</a>
+            </div>
+        </div>
+    </main>
+
+    <section id="features" class="features-container">
+        <div class="features-header">
+            <h2>Built for enterprise speed.</h2>
+            <p>Everything you need to stop watching recordings and start executing.</p>
+        </div>
+        <div class="features">
+            <!-- Box 1 -->
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="22"></line>
+                        <line x1="8" y1="22" x2="16" y2="22"></line>
+                    </svg>
+                </div>
+                <h3 class="feature-title">Advanced Transcription</h3>
+                <p class="feature-desc">Diariarizes multi-speaker audio with flawless accuracy using whisper-level models natively piped into LangChain workflows.</p>
+            </div>
+            
+            <!-- Box 2 -->
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                </div>
+                <h3 class="feature-title">Department Privacy</h3>
+                <p class="feature-desc">Mathematically enforced isolation. HR cannot read Engineering. Tokens strictly lock LLM context vectors to your designated department.</p>
+            </div>
+            
+            <!-- Box 3 -->
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                        <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                        <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                        <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                    </svg>
+                </div>
+                <h3 class="feature-title">Local Infrastructure</h3>
+                <p class="feature-desc">Our stack utilizes local instances. Never wait on slow third-party API rate limits and keep your highly confidential data internal.</p>
+            </div>
+
+            <!-- Box 4 -->
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 11 12 14 22 4"></polyline>
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                    </svg>
+                </div>
+                <h3 class="feature-title">Action Extraction</h3>
+                <p class="feature-desc">Our intelligent parser automatically reads between the lines, detecting promises across the team and assigning deadlines before the meeting ends.</p>
+            </div>
+
+            <!-- Box 5 -->
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                </div>
+                <h3 class="feature-title">Interactive AI Q&amp;A</h3>
+                <p class="feature-desc">Have a memory lapse? Just ask the AI. It acts as an omniscient corporate secretary with perfect contextual memory of previous chat history.</p>
+            </div>
+
+            <!-- Box 6 -->
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                </div>
+                <h3 class="feature-title">Automated Summaries</h3>
+                <p class="feature-desc">Generates highly coherent, well-structured multi-point final reports containing the crux of your multi-hour sessions in seconds.</p>
+            </div>
+        </div>
+    </section>
+</body>
+</html>

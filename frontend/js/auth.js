@@ -1,0 +1,124 @@
+const API_BASE_URL = '/api/user'; // Dynamically uses current host to prevent cookie drop failures
+
+function hasAuthToken() {
+    return document.cookie.split(';').some(c => c.trim().startsWith('access_token='));
+}
+
+if (localStorage.getItem('isAuthenticated') === 'true' && !hasAuthToken()) {
+    localStorage.removeItem('isAuthenticated');
+}
+
+// Check for existing login flag on page load
+if (localStorage.getItem('isAuthenticated') === 'true') {
+    // Rely on original local flag logic for speed/offline support
+    window.location.replace('chat.html');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    
+    // Check which form exists
+    const loginForm = document.getElementById('login-form');
+    const signupForm = document.getElementById('signup-form');
+    const errorMessage = document.getElementById('error-message');
+    const successMessage = document.getElementById('success-message');
+
+    function showError(msg) {
+        errorMessage.innerText = msg;
+        errorMessage.style.display = 'block';
+        if(successMessage) successMessage.style.display = 'none';
+    }
+
+    function showSuccess(msg) {
+        successMessage.innerText = msg;
+        successMessage.style.display = 'block';
+        if(errorMessage) errorMessage.style.display = 'none';
+    }
+
+    // Handles User Signup
+    if (signupForm) {
+        signupForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const name = document.getElementById('name').value;
+            const email = document.getElementById('email').value;
+            const dept = parseInt(document.getElementById('dept').value);
+            const team_id = parseInt(document.getElementById('team_id').value);
+            
+            const signupBtn = signupForm.querySelector('button');
+            signupBtn.innerHTML = 'Signing Up...';
+            signupBtn.disabled = true;
+
+            try {
+                const res = await fetch(`${API_BASE_URL}/signup`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ name, email, dept, team_id })
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    localStorage.setItem('isAuthenticated', 'true');
+                    localStorage.setItem('userName', name);
+                    showSuccess("Account created! Logging you in...");
+                    setTimeout(() => {
+                        window.location.replace('chat.html');
+                    }, 500);
+                } else {
+                    showError(data.detail || 'Signup failed. Please try again.');
+                }
+            } catch (err) {
+                showError('Could not connect to the server. Is it running?');
+            } finally {
+                signupBtn.innerHTML = 'Sign Up';
+                signupBtn.disabled = false;
+            }
+        });
+    }
+
+    // Handles User Login
+    if (loginForm) {
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const email = document.getElementById('email').value;
+            const dept = parseInt(document.getElementById('dept').value);
+            
+            const loginBtn = loginForm.querySelector('button');
+            loginBtn.innerHTML = 'Logging In...';
+            loginBtn.disabled = true;
+
+            try {
+                // Important: Include credentials to accept the secure HttpOnly cookie!
+                const res = await fetch(`${API_BASE_URL}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ email, dept })
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok) {
+                    localStorage.setItem('isAuthenticated', 'true');
+                    if (data.name) localStorage.setItem('userName', data.name);
+                    loginBtn.innerHTML = 'Success!';
+                    setTimeout(() => {
+                        window.location.replace('chat.html');
+                    }, 500);
+                } else {
+                    showError(data.detail || 'Login failed. Please check credentials.');
+                }
+            } catch (err) {
+                showError('Could not connect to the server. Is it running?');
+            } finally {
+                if(loginBtn.innerHTML !== 'Success!') {
+                    loginBtn.innerHTML = 'Log In';
+                    loginBtn.disabled = false;
+                }
+            }
+        });
+    }
+
+});

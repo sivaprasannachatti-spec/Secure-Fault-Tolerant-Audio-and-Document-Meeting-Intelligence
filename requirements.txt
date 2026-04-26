@@ -1,0 +1,20 @@
+langchain
+langchain-core
+langchain-classic
+langchain-ollama
+langchain-groq
+langgraph
+pydantic
+python-dotenv
+openai-whisper
+pyannote-audio
+torch
+librosa
+fastapi
+uvicorn
+supabase
+PyJWT
+noisereduce
+python-multipart
+faster-whisper
+# -e .
