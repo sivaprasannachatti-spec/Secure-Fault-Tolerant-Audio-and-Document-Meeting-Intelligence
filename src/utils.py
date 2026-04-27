@@ -1,7 +1,6 @@
 import sys
 import librosa
 import os
-import whisper
 import torch
 import traceback
 import tempfile
@@ -33,7 +32,8 @@ print("📦 Loading AI Models (Whisper & Diarization)...")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"🖥️ Using device: {device}")
 
-WHISPER_MODEL = WhisperModel.load_model("base")
+compute_type = "float16" if torch.cuda.is_available() else "int8"
+WHISPER_MODEL = WhisperModel("base", device="cuda" if torch.cuda.is_available() else "cpu", compute_type=compute_type)
 
 DIARIZATION_PIPELINE = Pipeline.from_pretrained(
     "pyannote/speaker-diarization-3.1",
@@ -65,23 +65,23 @@ def convert_audio(state):
             
             if duration < 10:
                 logging.info("⚠️ Audio too short for diarization, using transcription only.")
-                result = model.transcribe(temp_path, fp16=False)
-                segments = result["segments"]
-                final_transcript = [f"UNKNOWN: {seg['text'].strip()}" for seg in segments]
+                segments_gen, _ = model.transcribe(temp_path)
+                segments = list(segments_gen)
+                final_transcript = [f"UNKNOWN: {seg.text.strip()}" for seg in segments]
                 return {"converted_audio": "\n".join(final_transcript)}
             
             logging.info("👥 Identifying speakers (this may take a few minutes)...")
             diarization = diarization_pipeline(temp_path)
             
             logging.info(f"🎤 Whisper is transcribing (this may take a few minutes)...")
-            result = model.transcribe(temp_path, fp16=False)
-            segments = result["segments"]
+            segments_gen, _ = model.transcribe(temp_path)
+            segments = list(segments_gen)
             final_transcript = []
             
             for segment in segments:
-                start_time = segment["start"]
-                end_time = segment["end"]
-                text = segment["text"].strip()
+                start_time = segment.start
+                end_time = segment.end
+                text = segment.text.strip()
                 
                 try:
                     intersection = diarization.crop(Segment(start_time, end_time))
