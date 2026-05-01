@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sendBtn = document.getElementById('send-btn');
 
     let currentChatTitle = null; // Tracks which chat we are currently in
+    let currentChatId = null;
     let activeTimerInterval = null;
     let currentMeetingId = null;
 

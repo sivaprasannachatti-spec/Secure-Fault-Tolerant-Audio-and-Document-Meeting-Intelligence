@@ -11,6 +11,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage
 from backend.utils.user_utils import isOnline
 from backend.utils.SQlite_utils import insertMessages, getMessages
+from src.utils import QWEN_MODEL
 
 def createNewChat(msg, chat_id, final_report):
     try:
@@ -79,7 +80,7 @@ def streamNewChat(msg, chat_id, final_report, online):
 
 def generateMeetingTitle(prompt, final_report):
     try:
-        llm = ChatOllama(model='qwen3:0.6b')
+        llm = QWEN_MODEL
         chain = prompt | llm | StrOutputParser()
         result = chain.invoke({"final_report": final_report})
         return result
@@ -88,7 +89,7 @@ def generateMeetingTitle(prompt, final_report):
     
 def generateChatTitle(prompt, msg):
     try:
-        llm = ChatOllama(model='qwen2.5:3b')
+        llm = QWEN_MODEL
         chain = prompt | llm | StrOutputParser()
         result = chain.invoke({"user_prompt": msg.query})
         return result

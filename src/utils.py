@@ -24,7 +24,7 @@ from src.meeting_state import state
 load_dotenv()
 
 # Global LLM Instances for speed and memory persistence
-QWEN_MODEL = ChatOllama(model='qwen3:0.6b', keep_alive=-1)
+QWEN_MODEL = ChatOllama(model='qwen3:8b', keep_alive=-1)
 PHI_MODEL = ChatOllama(model='phi4-mini', keep_alive=-1)
 
 # Global Model Loading (Initialized once on startup)

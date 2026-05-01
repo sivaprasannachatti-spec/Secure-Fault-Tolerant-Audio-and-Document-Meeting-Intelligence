@@ -6,12 +6,13 @@ from src.exception import CustomException
 from src.logger import logging
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
+from src.utils import QWEN_MODEL
 
 class MeetingChat:
     def handleNewMeetingChat(self, query, final_report):
         try:
             prompt = self.createPrompt()[0]
-            llm = ChatOllama(model='qwen3:0.6b')
+            llm = QWEN_MODEL
             chain = prompt | llm | StrOutputParser()
             result = chain.invoke({"final_report": final_report, "query": query})
             return result
@@ -21,7 +22,7 @@ class MeetingChat:
     def streamNewMeetingChat(self, query, final_report):
         try:
             prompt = self.createPrompt()[0]
-            llm = ChatOllama(model='qwen3:0.6b')
+            llm = QWEN_MODEL
             chain = prompt | llm | StrOutputParser()
             return chain.stream({"final_report": final_report, "query": query})
         except Exception as e:
@@ -30,7 +31,7 @@ class MeetingChat:
     def handleOldMeetingChat(self, query, chat_history, final_report):
         try:
             prompt = self.createPrompt()[1]
-            llm = ChatOllama(model='qwen3:0.6b')
+            llm = QWEN_MODEL
             chain = prompt | llm | StrOutputParser()
             result = chain.invoke({"final_report": final_report, "chat_history": chat_history, "query": query})
             return result
@@ -40,7 +41,7 @@ class MeetingChat:
     def streamOldMeetingChat(self, query, chat_history, final_report):
         try:
             prompt = self.createPrompt()[1]
-            llm = ChatOllama(model='qwen3:0.6b')
+            llm = QWEN_MODEL
             chain = prompt | llm | StrOutputParser()
             return chain.stream({"final_report": final_report, "chat_history": chat_history, "query": query})
         except Exception as e:
