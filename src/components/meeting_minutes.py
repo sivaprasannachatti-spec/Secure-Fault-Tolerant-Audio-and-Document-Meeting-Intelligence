@@ -8,6 +8,50 @@ from src.utils import convert_audio, generate_summary, generate_action_items, ge
 from src.meeting_state import MeetingMinutes as MeetingMinutes
 
 class MeetingProcessor:
+    def streamMeetingMinutes(self, target_dept, cleaned_audio):
+        """
+        Generator that executes the meeting pipeline sequentially 
+        and yields SSE events after each stage completes.
+        """
+        import json
+
+        if cleaned_audio is None:
+            raise HTTPException(status_code=404, detail="Please upload any meeting")
+        
+        state = {"cleaned_audio": cleaned_audio}
+
+        # Stage 1: Audio Transcription
+        yield f"data: {json.dumps({'stage': 'transcription', 'status': 'in_progress'})}\n\n"
+        result = convert_audio(state)
+        state.update(result)
+        yield f"data: {json.dumps({'stage': 'transcription', 'status': 'done'})}\n\n"
+
+        # Stage 2: Summary Generation
+        yield f"data: {json.dumps({'stage': 'summary', 'status': 'in_progress'})}\n\n"
+        result = generate_summary(state)
+        state.update(result)
+        yield f"data: {json.dumps({'stage': 'summary', 'status': 'done'})}\n\n"
+
+        # Stage 3: Action Items Extraction
+        yield f"data: {json.dumps({'stage': 'action_items', 'status': 'in_progress'})}\n\n"
+        result = generate_action_items(state)
+        state.update(result)
+        yield f"data: {json.dumps({'stage': 'action_items', 'status': 'done'})}\n\n"
+
+        # Stage 4: Key Decisions Identification
+        yield f"data: {json.dumps({'stage': 'key_decisions', 'status': 'in_progress'})}\n\n"
+        result = generate_key_decisions(state)
+        state.update(result)
+        yield f"data: {json.dumps({'stage': 'key_decisions', 'status': 'done'})}\n\n"
+
+        # Stage 5: Format Final Report
+        yield f"data: {json.dumps({'stage': 'formatting', 'status': 'in_progress'})}\n\n"
+        result = format_text(state)
+        state.update(result)
+        
+        final_report = state.get('final_report', '')
+        yield f"data: {json.dumps({'stage': 'complete', 'final_report': final_report})}\n\n"
+
     def generateMeetingMinutes(self, target_dept, cleaned_audio):
         try:
             if cleaned_audio == None:

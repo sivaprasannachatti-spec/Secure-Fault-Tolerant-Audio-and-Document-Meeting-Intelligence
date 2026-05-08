@@ -25,6 +25,7 @@ load_dotenv()
 
 # Global LLM Instances for speed and memory persistence
 QWEN_MODEL = ChatOllama(model='qwen3:8b', keep_alive=-1)
+LLAMA_MODEL = ChatOllama(model='llama3.2:3b', keep_alive=-1)
 PHI_MODEL = ChatOllama(model='phi4-mini', keep_alive=-1)
 
 # Global Model Loading (Initialized once on startup)

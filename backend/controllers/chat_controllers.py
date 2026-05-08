@@ -19,6 +19,7 @@ from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import StrOutputParser
 def handleMeetingGeneration(request, audio_bytes, is_department_wide):
     try:
+        import json
         online = isOnline()
         audio_transformation = DataTransformation()
         cleaned_audio = audio_transformation.preprocess_audio(audio_bytes=audio_bytes)
@@ -29,39 +30,50 @@ def handleMeetingGeneration(request, audio_bytes, is_department_wide):
         dept_id = request.state.user['dept_id']
         team_id = request.state.user.get('team_id')
 
-        # Run the full AI workflow synchronously (keeping all evaluation/optimization loops)
-        meeting_obj = MeetingProcessor()
-        meeting_report = meeting_obj.generateMeetingMinutes(target_dept=dept_id, cleaned_audio=cleaned_audio)
-        
-        # Generate the Meeting Title using the specific prompt
-        meeting_title = generateMeetingTitle(prompt=getPrompts()[3], final_report=meeting_report)
-        
-        if online:
-            response = (
-                supabase.table("meetings")
-                .insert({
-                    "target_dept": dept_id, 
-                    "team_id": team_id, 
-                    "is_department_wide": is_department_wide, 
-                    "final_report": meeting_report,
-                    "meeting_title": meeting_title
-                })
-                .execute()
-            )
-            if not response.data:
-                raise HTTPException(status_code=500, detail="Failed to create meeting")
-            generated_id = response.data[0]['meeting_id']
-        else:
-            # For offline, we save the full report and title immediately
-            from backend.utils.SQlite_utils import save_meeting_offline
-            generated_id = save_meeting_offline(dept_id, team_id, is_department_wide, meeting_report, meeting_title)
+        def stream_pipeline():
+            meeting_obj = MeetingProcessor()
+            final_report = None
 
-        return JSONResponse(status_code=201, content={
-            "message": "Meeting processed successfully", 
-            "meeting_id": generated_id,
-            "final_report": meeting_report,
-            "meeting_title": meeting_title
-        })
+            # Stream all pipeline stages (transcription → summary → action items → key decisions → format)
+            for event in meeting_obj.streamMeetingMinutes(target_dept=dept_id, cleaned_audio=cleaned_audio):
+                # Capture the final report from the 'complete' event
+                try:
+                    event_data = event.replace("data: ", "").strip()
+                    parsed = json.loads(event_data)
+                    if parsed.get('stage') == 'complete':
+                        final_report = parsed.get('final_report', '')
+                except:
+                    pass
+                yield event
+
+            # After pipeline completes, generate title and save to DB
+            if final_report:
+                yield f"data: {json.dumps({'stage': 'saving', 'status': 'in_progress'})}\n\n"
+                
+                meeting_title = generateMeetingTitle(prompt=getPrompts()[3], final_report=final_report)
+                
+                if online:
+                    response = (
+                        supabase.table("meetings")
+                        .insert({
+                            "target_dept": dept_id, 
+                            "team_id": team_id, 
+                            "is_department_wide": is_department_wide, 
+                            "final_report": final_report,
+                            "meeting_title": meeting_title
+                        })
+                        .execute()
+                    )
+                    generated_id = response.data[0]['meeting_id'] if response.data else None
+                else:
+                    from backend.utils.SQlite_utils import save_meeting_offline
+                    generated_id = save_meeting_offline(dept_id, team_id, is_department_wide, final_report, meeting_title)
+
+                yield f"data: {json.dumps({'stage': 'saved', 'meeting_id': generated_id, 'meeting_title': meeting_title, 'final_report': final_report})}\n\n"
+            
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(stream_pipeline(), media_type="text/event-stream")
 
     except HTTPException:
         raise

@@ -1,5 +1,14 @@
 const API_BASE_URL = '/api';
 
+const STAGE_CONFIG = {
+    transcription:  { icon: '🔊', label: 'Transcribing audio...' },
+    summary:        { icon: '📝', label: 'Generating summary...' },
+    action_items:   { icon: '✅', label: 'Extracting action items...' },
+    key_decisions:  { icon: '🔑', label: 'Identifying key decisions...' },
+    formatting:     { icon: '📋', label: 'Formatting report...' },
+    saving:         { icon: '💾', label: 'Saving to workspace...' }
+};
+
 document.getElementById('upload-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     
@@ -17,8 +26,16 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
     formData.append("file", file);
     formData.append("is_department_wide", isDepartmentWide);
 
-    // Immediately replace the UI with a beautiful "Chat Processing" layout
-    // This allows the user to feel they've entered the workspace while waiting.
+    // Build the progress stages HTML
+    const stagesHTML = Object.entries(STAGE_CONFIG).map(([key, config]) => `
+        <div class="stage-row" id="stage-${key}" style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); transition: all 0.4s ease;">
+            <span class="stage-icon" style="font-size: 1.3rem; min-width: 28px; text-align: center;">${config.icon}</span>
+            <span class="stage-label" style="flex: 1; color: var(--text-secondary); font-size: 0.95rem; font-weight: 500;">${config.label}</span>
+            <span class="stage-status" style="font-size: 0.85rem; color: var(--text-secondary); min-width: 24px; text-align: center;">⬚</span>
+        </div>
+    `).join('');
+
+    // Replace UI with the streaming progress layout
     document.body.innerHTML = `
         <div class="app-container">
             <aside class="sidebar" style="pointer-events: none; opacity: 0.6;">
@@ -36,16 +53,18 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
                 </div>
             </aside>
             <main class="main-chat" style="display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg-main);">
-                <svg width="80" height="80" viewBox="0 0 100 100" class="claude-icon">
+                <svg width="60" height="60" viewBox="0 0 100 100" class="claude-icon" style="margin-bottom: 1.5rem;">
                      <rect x="20" y="20" width="25" height="25" rx="6" fill="#a855f7" class="block1" />
                      <rect x="55" y="20" width="25" height="25" rx="6" fill="#ec4899" class="block2" />
                      <rect x="20" y="55" width="25" height="25" rx="6" fill="#6366f1" class="block3" />
                      <rect x="55" y="55" width="25" height="25" rx="6" fill="#3b82f6" class="block4" />
                 </svg>
-                <div id="processing-msg">
-                    <h2 style="color: var(--text-primary); margin-top: 2.5rem; font-size: 1.6rem; font-weight: 600; letter-spacing: 0.5px; text-align: center;">Synthesizing Meeting...</h2>
-                    <p style="color: var(--text-secondary); max-width: 420px; text-align: center; margin-top: 1rem; line-height: 1.6; font-size: 1.05rem;">We are securely analyzing the audio and generating your departmental summary. This usually takes just a moment.</p>
+                <h2 style="color: var(--text-primary); font-size: 1.5rem; font-weight: 600; letter-spacing: 0.5px; text-align: center; margin-bottom: 0.5rem;">Processing Meeting</h2>
+                <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 2rem; text-align: center;">AI pipeline is analyzing your audio in real-time</p>
+                <div id="progress-stages" style="display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 420px;">
+                    ${stagesHTML}
                 </div>
+                <div id="completion-msg" style="display: none; margin-top: 2rem; text-align: center;"></div>
             </main>
         </div>
         <style>
@@ -66,6 +85,19 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
             @keyframes slide2 { 0% { transform: translate(0, 0) scale(1); border-radius: 6px; } 100% { transform: translate(-12px, 12px) scale(0.85); border-radius: 12px; } }
             @keyframes slide3 { 0% { transform: translate(0, 0) scale(1); border-radius: 6px; } 100% { transform: translate(12px, -12px) scale(0.85); border-radius: 12px; } }
             @keyframes slide4 { 0% { transform: translate(0, 0) scale(1); border-radius: 6px; } 100% { transform: translate(-12px, -12px) scale(0.85); border-radius: 12px; } }
+            
+            .stage-active {
+                background: rgba(168, 85, 247, 0.1) !important;
+                border-color: rgba(168, 85, 247, 0.3) !important;
+            }
+            .stage-done {
+                background: rgba(16, 185, 129, 0.08) !important;
+                border-color: rgba(16, 185, 129, 0.2) !important;
+            }
+            
+            @keyframes spin-status {
+                100% { transform: rotate(360deg); }
+            }
         </style>
     `;
 
@@ -81,27 +113,88 @@ document.getElementById('upload-form').addEventListener('submit', async (e) => {
             throw new Error(data.detail || "Upload failed");
         }
 
-        const result = await res.json();
-        
-        // Success! Redirect the user straight into the specific chat workspace
-        document.getElementById('processing-msg').innerHTML = `
-            <h2 style="color: #10b981; margin-top: 2.5rem; font-size: 1.6rem; font-weight: 600; text-align: center;">✓ Workspace Ready!</h2>
-            <p style="color: var(--text-secondary); max-width: 420px; text-align: center; margin-top: 1rem; line-height: 1.6; font-size: 1.05rem;">Redirecting to your chat...</p>
-        `;
-        
-        setTimeout(() => {
-            // Once the chat logic is ready we go to the chat and flag auto-load (optional)
-            // Storing slightly as session state if we wanted to auto-open it
-            sessionStorage.setItem('newlyCreatedMeetingId', result.meeting_id);
-            window.location.replace('chat.html');
-        }, 1000);
+        // Read the SSE stream
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const payload = line.slice(6).trim();
+                
+                if (payload === '[DONE]') continue;
+
+                try {
+                    const event = JSON.parse(payload);
+                    handleStageEvent(event);
+                } catch (e) {
+                    // Skip unparseable events
+                }
+            }
+        }
 
     } catch (err) {
         console.error(err);
-        document.getElementById('processing-msg').innerHTML = `
-            <h2 style="color: #ef4444; margin-top: 2.5rem; font-size: 1.6rem; font-weight: 600; text-align: center;">Processing Error</h2>
-            <p style="color: var(--text-secondary); max-width: 420px; text-align: center; margin-top: 1rem; line-height: 1.6; font-size: 1.05rem;">${err.message || "An error occurred during processing."}</p>
+        const completionMsg = document.getElementById('completion-msg') || document.body;
+        completionMsg.style.display = 'block';
+        completionMsg.innerHTML = `
+            <h2 style="color: #ef4444; font-size: 1.4rem; font-weight: 600;">Processing Error</h2>
+            <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">${err.message || "An error occurred during processing."}</p>
             <button onclick="window.location.reload()" class="btn-primary" style="margin-top: 1.5rem; padding: 0.75rem 1.5rem;">Try Again</button>
         `;
     }
 });
+
+function handleStageEvent(event) {
+    const { stage, status } = event;
+
+    if (stage === 'saved') {
+        // Final event — redirect to chat
+        sessionStorage.setItem('newlyCreatedMeetingId', event.meeting_id);
+        
+        // Stop the loading animation
+        const icon = document.querySelector('.claude-icon');
+        if (icon) icon.style.animation = 'none';
+
+        const completionMsg = document.getElementById('completion-msg');
+        if (completionMsg) {
+            completionMsg.style.display = 'block';
+            completionMsg.innerHTML = `
+                <h2 style="color: #10b981; font-size: 1.4rem; font-weight: 600;">✓ Workspace Ready!</h2>
+                <p style="color: var(--text-secondary); margin-top: 0.5rem; font-size: 0.95rem;">Redirecting to your chat...</p>
+            `;
+        }
+        setTimeout(() => {
+            window.location.replace('chat.html');
+        }, 1000);
+        return;
+    }
+
+    if (stage === 'complete') return; // Internal event, skip UI update
+
+    const stageEl = document.getElementById(`stage-${stage}`);
+    if (!stageEl) return;
+
+    const statusEl = stageEl.querySelector('.stage-status');
+    const labelEl = stageEl.querySelector('.stage-label');
+
+    if (status === 'in_progress') {
+        stageEl.classList.add('stage-active');
+        stageEl.classList.remove('stage-done');
+        if (statusEl) statusEl.innerHTML = '<span style="display:inline-block; animation: spin-status 1s linear infinite;">⏳</span>';
+        if (labelEl) labelEl.style.color = 'var(--text-primary)';
+    } else if (status === 'done') {
+        stageEl.classList.remove('stage-active');
+        stageEl.classList.add('stage-done');
+        if (statusEl) statusEl.textContent = '✅';
+        if (labelEl) labelEl.style.color = '#10b981';
+    }
+}
