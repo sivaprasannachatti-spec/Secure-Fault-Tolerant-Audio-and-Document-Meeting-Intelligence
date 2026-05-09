@@ -1309,3 +1309,203 @@ details[class="thinking-block"] > summary::-webkit-details-marker {
 /* Base Styles needed for Mobile Header */
 .mobile-nav-header { display: none; }
 .sidebar-overlay { display: none; }
+
+/* ===== MEETING REPORT CARDS ===== */
+.report-container {
+    width: 100%;
+    max-width: 680px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.report-section {
+    background: rgba(19, 23, 41, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.report-section:hover {
+    border-color: rgba(129, 140, 248, 0.15);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.report-section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 18px;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.report-section-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+.report-section-icon.summary {
+    background: rgba(99, 102, 241, 0.12);
+}
+
+.report-section-icon.actions {
+    background: rgba(16, 185, 129, 0.12);
+}
+
+.report-section-icon.decisions {
+    background: rgba(245, 158, 11, 0.12);
+}
+
+.report-section-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-secondary);
+}
+
+.report-section-body {
+    padding: 16px 18px;
+}
+
+/* Summary Section */
+.report-summary-text {
+    font-size: 0.92rem;
+    line-height: 1.75;
+    color: var(--text-primary);
+    opacity: 0.9;
+}
+
+/* Action Items */
+.action-item-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    transition: all 0.2s ease;
+}
+
+.action-item-card:last-child {
+    margin-bottom: 0;
+}
+
+.action-item-card:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(16, 185, 129, 0.15);
+}
+
+.action-item-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.action-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.action-meta-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+}
+
+.action-meta-tag.speaker {
+    background: rgba(99, 102, 241, 0.1);
+    color: #a5b4fc;
+    border: 1px solid rgba(99, 102, 241, 0.15);
+}
+
+.action-meta-tag.deadline {
+    background: rgba(245, 158, 11, 0.1);
+    color: #fcd34d;
+    border: 1px solid rgba(245, 158, 11, 0.15);
+}
+
+.action-meta-tag.status {
+    background: rgba(16, 185, 129, 0.1);
+    color: #6ee7b7;
+    border: 1px solid rgba(16, 185, 129, 0.15);
+}
+
+/* Key Decisions */
+.decision-item {
+    display: flex;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.decision-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.decision-item:first-child {
+    padding-top: 0;
+}
+
+.decision-bullet {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #f59e0b, #f97316);
+    flex-shrink: 0;
+    margin-top: 6px;
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);
+}
+
+.decision-content {
+    flex: 1;
+}
+
+.decision-topic {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #fcd34d;
+    margin-bottom: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.decision-text {
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+    opacity: 0.9;
+}
+
+.decision-speaker {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+/* Empty state for report sections */
+.report-empty {
+    color: var(--text-muted);
+    font-size: 0.88rem;
+    font-style: italic;
+    text-align: center;
+    padding: 8px 0;
+}

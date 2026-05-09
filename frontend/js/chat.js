@@ -195,7 +195,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     title.innerText = "Synthesized Meeting";
                     
                     reportDiv.style.display = 'block';
-                    reportDiv.innerHTML = `<strong>Final Report:</strong><br><br>${meeting.final_report.replace(/\n/g, '<br>')}`;
+                    reportDiv.innerHTML = renderMeetingReport(meeting.final_report);
                     
                     currentMeetingId = meetingId;
                     clearActiveProcess();
@@ -339,11 +339,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 reportDiv.className = 'message ai';
                 reportDiv.innerHTML = `
                     <div class="avatar" style="background: var(--accent-gradient); color: white; font-size: 0.8rem; font-weight: bold;">AI</div>
-                    <div class="message-box" style="width: 100%; max-width: 650px; border: 1px solid rgba(255, 255, 255, 0.1);">
-                        <div class="message-content" style="padding: 10px;">
-                            <strong>Meeting Analysis Report:</strong><br><br>
-                            ${content.final_report.replace(/\n/g, '<br>')}
-                        </div>
+                    <div class="message-box" style="width: 100%; max-width: 680px;">
+                        ${renderMeetingReport(content.final_report)}
                     </div>
                 `;
                 chatMessages.appendChild(reportDiv);
@@ -392,11 +389,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 reportDiv.className = 'message ai';
                 reportDiv.innerHTML = `
                     <div class="avatar" style="background: var(--accent-gradient); color: white; font-size: 0.8rem; font-weight: bold;">AI</div>
-                    <div class="message-box" style="width: 100%; max-width: 650px; border: 1px solid rgba(255, 255, 255, 0.1);">
-                        <div class="message-content" style="padding: 10px;">
-                            <strong>Meeting Analysis Report:</strong><br><br>
-                            ${data.final_report.replace(/\n/g, '<br>')}
-                        </div>
+                    <div class="message-box" style="width: 100%; max-width: 680px;">
+                        ${renderMeetingReport(data.final_report)}
                     </div>
                     <div style="width: 100%; height: 1px; background: rgba(255, 255, 255, 0.05); margin: 20px 0;"></div>
                 `;
@@ -431,6 +425,86 @@ document.addEventListener('DOMContentLoaded', async () => {
         `;
         chatMessages.appendChild(msgDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // 6b. Render structured meeting report as premium cards
+    function renderMeetingReport(reportData) {
+        // Try parsing JSON, fallback to plain text for old reports
+        let report;
+        try {
+            report = typeof reportData === 'string' ? JSON.parse(reportData) : reportData;
+        } catch (e) {
+            // Old plain-text format — render as-is
+            return `<div class="message-content" style="padding: 10px;"><strong>Meeting Analysis Report:</strong><br><br>${reportData.replace(/\n/g, '<br>')}</div>`;
+        }
+
+        // Build Action Items HTML
+        let actionItemsHTML = '';
+        if (report.action_items && report.action_items.length > 0) {
+            actionItemsHTML = report.action_items.map(item => `
+                <div class="action-item-card">
+                    <div class="action-item-title">${item.action_item || 'N/A'}</div>
+                    <div class="action-item-meta">
+                        <span class="action-meta-tag speaker">👤 ${item.speaker || 'Unknown'}</span>
+                        <span class="action-meta-tag deadline">📅 ${item.deadline || 'N/A'}</span>
+                        <span class="action-meta-tag status">● ${item.status || 'Pending'}</span>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            actionItemsHTML = '<div class="report-empty">No action items identified</div>';
+        }
+
+        // Build Key Decisions HTML
+        let decisionsHTML = '';
+        if (report.key_decisions && report.key_decisions.length > 0) {
+            decisionsHTML = report.key_decisions.map(item => `
+                <div class="decision-item">
+                    <div class="decision-bullet"></div>
+                    <div class="decision-content">
+                        <div class="decision-topic">${item.topic || 'General'}</div>
+                        <div class="decision-text">${item.decision || 'N/A'}</div>
+                        <div class="decision-speaker">by ${item.speaker || 'Unknown'}</div>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            decisionsHTML = '<div class="report-empty">No key decisions recorded</div>';
+        }
+
+        return `
+            <div class="report-container">
+                <div class="report-section">
+                    <div class="report-section-header">
+                        <div class="report-section-icon summary">📝</div>
+                        <div class="report-section-title">Summary</div>
+                    </div>
+                    <div class="report-section-body">
+                        <div class="report-summary-text">${report.summary || 'No summary available.'}</div>
+                    </div>
+                </div>
+
+                <div class="report-section">
+                    <div class="report-section-header">
+                        <div class="report-section-icon actions">✅</div>
+                        <div class="report-section-title">Action Items</div>
+                    </div>
+                    <div class="report-section-body">
+                        ${actionItemsHTML}
+                    </div>
+                </div>
+
+                <div class="report-section">
+                    <div class="report-section-header">
+                        <div class="report-section-icon decisions">🔑</div>
+                        <div class="report-section-title">Key Decisions</div>
+                    </div>
+                    <div class="report-section-body">
+                        ${decisionsHTML}
+                    </div>
+                </div>
+            </div>
+        `;
     }
 
     // 11. Mobile Responsiveness Handlers
@@ -700,7 +774,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             titleElement.innerText = "Synthesized Meeting";
             
             reportDiv.style.display = 'block';
-            reportDiv.innerHTML = `<strong>Final Report:</strong><br><br>${data.final_report.replace(/\n/g, '<br>')}`;
+            reportDiv.innerHTML = renderMeetingReport(data.final_report);
             
             currentMeetingId = data.meeting_id;
             clearActiveProcess();

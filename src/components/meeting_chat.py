@@ -1,49 +1,55 @@
 import sys
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_ollama import ChatOllama
 from src.exception import CustomException
 from src.logger import logging
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
-from src.utils import LLAMA_MODEL
 
 class MeetingChat:
     def handleNewMeetingChat(self, query, final_report):
         try:
+            from src.providers.llm_service import invoke_chat
             prompt = self.createPrompt()[0]
-            llm = LLAMA_MODEL
-            chain = prompt | llm | StrOutputParser()
-            result = chain.invoke({"final_report": final_report, "query": query})
+            result = invoke_chat(
+                chain_builder=lambda llm: prompt | llm | StrOutputParser(),
+                invoke_args={"final_report": final_report, "query": query}
+            )
             return result
         except Exception as e:
             raise CustomException(e, sys)
 
     def streamNewMeetingChat(self, query, final_report):
         try:
+            from src.providers.llm_service import stream_chat
             prompt = self.createPrompt()[0]
-            llm = LLAMA_MODEL
-            chain = prompt | llm | StrOutputParser()
-            return chain.stream({"final_report": final_report, "query": query})
+            return stream_chat(
+                chain_builder=lambda llm: prompt | llm | StrOutputParser(),
+                invoke_args={"final_report": final_report, "query": query}
+            )
         except Exception as e:
             raise CustomException(e, sys)
 
     def handleOldMeetingChat(self, query, chat_history, final_report):
         try:
+            from src.providers.llm_service import invoke_chat
             prompt = self.createPrompt()[1]
-            llm = LLAMA_MODEL
-            chain = prompt | llm | StrOutputParser()
-            result = chain.invoke({"final_report": final_report, "chat_history": chat_history, "query": query})
+            result = invoke_chat(
+                chain_builder=lambda llm: prompt | llm | StrOutputParser(),
+                invoke_args={"final_report": final_report, "chat_history": chat_history, "query": query}
+            )
             return result
         except Exception as e:
             raise CustomException(e, sys)
 
     def streamOldMeetingChat(self, query, chat_history, final_report):
         try:
+            from src.providers.llm_service import stream_chat
             prompt = self.createPrompt()[1]
-            llm = LLAMA_MODEL
-            chain = prompt | llm | StrOutputParser()
-            return chain.stream({"final_report": final_report, "chat_history": chat_history, "query": query})
+            return stream_chat(
+                chain_builder=lambda llm: prompt | llm | StrOutputParser(),
+                invoke_args={"final_report": final_report, "chat_history": chat_history, "query": query}
+            )
         except Exception as e:
             raise CustomException(e, sys)
     def createPrompt(self):

@@ -28,7 +28,20 @@ async def lifespan(app: FastAPI):
         print(f"  ⚠️ Model warmup failed (non-critical): {e}")
     print("🚀 Server ready! All models pre-loaded.")
     
+    # Start Health Monitor for multi-provider inference orchestration
+    from src.providers.health_monitor import health_monitor
+    from src.providers.provider_manager import provider_manager as asr_manager
+    from src.providers.llm_service import generation_provider_manager, chat_provider_manager
+    
+    health_monitor.register_manager(asr_manager)
+    health_monitor.register_manager(generation_provider_manager)
+    health_monitor.register_manager(chat_provider_manager)
+    await health_monitor.start()
+    
     yield
+    
+    # Shutdown: stop health monitor
+    await health_monitor.stop()
 
 app = FastAPI(lifespan=lifespan)
 
@@ -49,6 +62,18 @@ app.add_middleware(
 
 app.include_router(router=user_router, prefix="/api/user")
 app.include_router(router=chat_router, prefix="/api/chat")
+
+# Provider health monitoring endpoint
+@app.get("/api/providers/status")
+async def provider_status():
+    """Returns real-time health of all provider pools."""
+    from src.providers.provider_manager import provider_manager as asr_mgr
+    from src.providers.llm_service import generation_provider_manager, chat_provider_manager
+    return {
+        "asr": asr_mgr.get_status_report(),
+        "generation": generation_provider_manager.get_status_report(),
+        "chat": chat_provider_manager.get_status_report(),
+    }
 
 # Serve the frontend files statically
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

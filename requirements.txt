@@ -18,3 +18,4 @@ noisereduce
 python-multipart
 faster-whisper
 # -e .
+psutil

@@ -80,18 +80,22 @@ def streamNewChat(msg, chat_id, final_report, online):
 
 def generateMeetingTitle(prompt, final_report):
     try:
-        llm = QWEN_MODEL
-        chain = prompt | llm | StrOutputParser()
-        result = chain.invoke({"final_report": final_report})
+        from src.providers.llm_service import invoke_generation
+        result = invoke_generation(
+            chain_builder=lambda llm: prompt | llm | StrOutputParser(),
+            invoke_args={"final_report": final_report}
+        )
         return result
     except Exception as e:
         raise CustomException(e, sys)
     
 def generateChatTitle(prompt, msg):
     try:
-        llm = LLAMA_MODEL
-        chain = prompt | llm | StrOutputParser()
-        result = chain.invoke({"user_prompt": msg.query})
+        from src.providers.llm_service import invoke_chat
+        result = invoke_chat(
+            chain_builder=lambda llm: prompt | llm | StrOutputParser(),
+            invoke_args={"user_prompt": msg.query}
+        )
         return result
     except Exception as e:
         raise CustomException(e, sys)

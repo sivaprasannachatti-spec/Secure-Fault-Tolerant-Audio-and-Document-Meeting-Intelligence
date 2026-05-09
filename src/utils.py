@@ -43,39 +43,63 @@ DIARIZATION_PIPELINE = Pipeline.from_pretrained(
 
 def convert_audio(state):
     try:
-        # Use globally loaded models instead of reloading them
-        model = WHISPER_MODEL
+        # Use globally loaded diarization pipeline
         diarization_pipeline = DIARIZATION_PIPELINE
+        
         # 1. Grab the raw audio bytes from the State
         audio_bytes = state.get('cleaned_audio')
         
         if not audio_bytes:
             print("❌ Error: No audio bytes provided in state.")
             return {"converted_audio": "ERROR: No audio bytes found"}
-        # 2. Write the bytes securely into a temporary file
-        # We use a context manager to ensure it gets created properly
+        
+        # 2. Write bytes to temp file (needed for diarization)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
             temp_audio.write(audio_bytes)
-            temp_path = temp_audio.name  # Get the path of the temporary file
+            temp_path = temp_audio.name
+        
         try:
             logging.info(f"✅ Loaded raw bytes into temporary file: {temp_path}")
             
-            # 3. Now we can proceed exactly like your old logic, but pointing to `temp_path`
             duration = librosa.get_duration(path=temp_path)
             logging.info(f"⏱️ Audio duration: {duration:.2f} seconds")
             
+            # 3. Transcription via multi-provider ASR service (Groq → HF → Local)
+            logging.info("🎤 Transcribing audio via ASR orchestration...")
+            try:
+                import asyncio
+                from src.providers.asr_service import transcribe_audio_chunked
+                
+                # Run async transcription from sync context
+                try:
+                    loop = asyncio.get_running_loop()
+                    # If already in an async context, create a task
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        transcript = pool.submit(asyncio.run, transcribe_audio_chunked(audio_bytes)).result()
+                except RuntimeError:
+                    # No running loop — safe to use asyncio.run()
+                    transcript = asyncio.run(transcribe_audio_chunked(audio_bytes))
+                    
+            except Exception as e:
+                logging.warning(f"⚠️ ASR service failed, falling back to local Whisper: {e}")
+                # Ultimate fallback — direct local whisper
+                segments_gen, _ = WHISPER_MODEL.transcribe(temp_path)
+                segments = list(segments_gen)
+                transcript = " ".join(seg.text.strip() for seg in segments)
+            
+            # 4. Diarization (always local with pyannote)
             if duration < 10:
                 logging.info("⚠️ Audio too short for diarization, using transcription only.")
-                segments_gen, _ = model.transcribe(temp_path)
-                segments = list(segments_gen)
-                final_transcript = [f"UNKNOWN: {seg.text.strip()}" for seg in segments]
-                return {"converted_audio": "\n".join(final_transcript)}
+                return {"converted_audio": f"SPEAKER_00: {transcript}"}
             
             logging.info("👥 Identifying speakers (this may take a few minutes)...")
             diarization = diarization_pipeline(temp_path)
             
-            logging.info(f"🎤 Whisper is transcribing (this may take a few minutes)...")
-            segments_gen, _ = model.transcribe(temp_path)
+            # 5. Re-transcribe with segments for speaker alignment
+            # (We need word-level timing for diarization matching)
+            logging.info("🔗 Aligning transcript with speaker segments...")
+            segments_gen, _ = WHISPER_MODEL.transcribe(temp_path)
             segments = list(segments_gen)
             final_transcript = []
             
@@ -85,11 +109,12 @@ def convert_audio(state):
                 text = segment.text.strip()
                 
                 try:
-                    intersection = diarization.crop(Segment(start_time, end_time))
+                    from pyannote.core import Segment as PyannoteSeg
+                    intersection = diarization.crop(PyannoteSeg(start_time, end_time))
                     active_speakers = intersection.labels()
                     
                     if active_speakers:
-                        speaker = active_speakers[0] 
+                        speaker = active_speakers[0]
                     else:
                         speaker = "UNKNOWN"
                 except Exception as e:
@@ -101,8 +126,6 @@ def convert_audio(state):
             logging.info("✅ Transcription & Diarization Complete.")
             return {"converted_audio": "\n".join(final_transcript)}
         finally:
-            # 4. CRITICAL: Clean up! Delete the temporary file so we don't leak storage 
-            # This 'finally' block ensures deletion even if an error occurs above
             if os.path.exists(temp_path):
                 os.remove(temp_path)
                 print("🧹 Cleaned up temporary audio file.")
@@ -115,30 +138,37 @@ def convert_audio(state):
 def generate_summary(state):
     try:
         print("In summary")
+        from src.providers.llm_service import invoke_generation
         summary_prompt = getPrompts()[0]
         converted_text = state.get('converted_audio', '')
         if not converted_text:
             return {"key_decisions": "No audio content to analyze"}
         logging.info("Prompts received successfully")
-        chain = summary_prompt | QWEN_MODEL | StrOutputParser()
-        summary = chain.invoke({"converted_audio": converted_text})
-        print(f"Summary: {summary}")
-        return {"summary": summary}
+        
+        result = invoke_generation(
+            chain_builder=lambda llm: summary_prompt | llm | StrOutputParser(),
+            invoke_args={"converted_audio": converted_text}
+        )
+        print(f"Summary: {result}")
+        return {"summary": result}
     except Exception as e:
         raise CustomException(e, sys)
     
 def generate_action_items(state):
     try:
         print("In action items")
+        from src.providers.llm_service import invoke_generation
         action_items_prompt = getPrompts()[1]
         action_items_parser = generate_structured_outputs()[0]
         converted_text = state.get('converted_audio', '')
         if not converted_text:
             return {"key_decisions": "No audio content to analyze"}
-        chain = action_items_prompt | QWEN_MODEL | action_items_parser
-        action_items_result = chain.invoke({"converted_audio": converted_text})
-        # Extract the list of dictionaries from the Pydantic model
-        action_items = [item.dict() for item in action_items_result.items]
+        
+        result = invoke_generation(
+            chain_builder=lambda llm: action_items_prompt | llm | action_items_parser,
+            invoke_args={"converted_audio": converted_text}
+        )
+        action_items = [item.dict() for item in result.items]
         print(f"Action items: {action_items}")
         return {"action_items": action_items}
     except Exception as e:
@@ -147,15 +177,18 @@ def generate_action_items(state):
 def generate_key_decisions(state):
     try:
         print("In key decisions")
+        from src.providers.llm_service import invoke_generation
         key_decisions_prompt = getPrompts()[2]
         key_decisions_parser = generate_structured_outputs()[1]
         converted_text = state.get('converted_audio', '')
         if not converted_text:
             return {"key_decisions": "No audio content to analyze"}
-        chain = key_decisions_prompt | QWEN_MODEL | key_decisions_parser
-        key_decisions_result = chain.invoke({"converted_audio": converted_text})
-        # Extract the list of dictionaries from the Pydantic model
-        key_decisions = [item.dict() for item in key_decisions_result.items]
+        
+        result = invoke_generation(
+            chain_builder=lambda llm: key_decisions_prompt | llm | key_decisions_parser,
+            invoke_args={"converted_audio": converted_text}
+        )
+        key_decisions = [item.dict() for item in result.items]
         print(f"Key decisions: {key_decisions}")
         return {"key_decisions": key_decisions}
     except Exception as e:
@@ -220,55 +253,35 @@ def evaluate_key_decisions(state):
     
 def format_text(state):
     """
-        This node creates the final string that the user actually sees.
+        This node creates the final structured JSON report.
     """
+    import json
+    
     # 1. Get data from State
     summary_text = state.get("summary", "No summary available.")
     actions_list = state.get("action_items", [])
     decisions_list = state.get("key_decisions", [])
 
-    # 2. Format Action Items 
-    formatted_actions = ""
-    # If it's a string, just use it. Otherwise, loop through the List of Dictionaries.
+    # 2. Normalize action items
     if isinstance(actions_list, str):
-        formatted_actions = actions_list
-    elif actions_list and len(actions_list) > 0:
-        for item in actions_list:
-            formatted_actions += f"- **Action Item:** {item.get('action_item', 'N/A')} | **Speaker:** {item.get('speaker', 'Unknown')} | **Deadline:** {item.get('deadline', 'N/A')} | **Status:** {item.get('status', 'N/A')}\n"
-    else:
-        formatted_actions = "No action items identified."
+        actions_list = [{"action_item": actions_list, "speaker": "Unknown", "deadline": "N/A", "status": "N/A"}]
+    elif not actions_list:
+        actions_list = []
 
-    # 3. Format Key Decisions 
-    formatted_decisions = ""
+    # 3. Normalize key decisions
     if isinstance(decisions_list, str):
-        formatted_decisions = decisions_list
-    elif decisions_list and len(decisions_list) > 0:
-        for item in decisions_list:
-            formatted_decisions += f"- **Topic:** {item.get('topic', 'N/A')} | **Decision:** {item.get('decision', 'N/A')} | **Speaker:** {item.get('speaker', 'Unknown')}\n"
-    else:
-        formatted_decisions = "No key decisions recorded."
+        decisions_list = [{"topic": "General", "decision": decisions_list, "speaker": "Unknown"}]
+    elif not decisions_list:
+        decisions_list = []
 
-    # 4. Combine everything into the User View
-    user_view = f"""
-    =========================================
-            MEETING ANALYSIS REPORT
-    =========================================
-
-    SUMMARY:
-    {summary_text}
-
-    -----------------------------------------
-    ACTION ITEMS:
-    {formatted_actions}
-
-    -----------------------------------------
-    KEY DECISIONS:
-    {formatted_decisions}
-    =========================================
-    """
+    # 4. Build structured report as JSON string
+    report = {
+        "summary": summary_text,
+        "action_items": actions_list,
+        "key_decisions": decisions_list
+    }
         
-        # Save to the final state field (assuming you add 'final_report' to your TypedDict)
-    return {"final_report": user_view}
+    return {"final_report": json.dumps(report)}
         
 def check_summary(state):
     try:
