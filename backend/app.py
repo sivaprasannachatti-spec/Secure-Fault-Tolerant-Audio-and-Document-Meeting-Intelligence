@@ -15,6 +15,19 @@ async def lifespan(app: FastAPI):
     setup_offline_database()
     sync_all_users_to_sqlite()
     sync_offline_data_to_supabase()
+    
+    # Warmup: Pre-load LLM models into Ollama's memory so the first user request is fast
+    print("🔥 Warming up AI models...")
+    try:
+        from src.utils import LLAMA_MODEL, QWEN_MODEL
+        LLAMA_MODEL.invoke("hi")  # Forces Ollama to load llama3.2:3b into memory
+        print("  ✅ Chat model (llama3.2:3b) loaded")
+        QWEN_MODEL.invoke("hi")   # Forces Ollama to load qwen3:8b into memory
+        print("  ✅ Generation model (qwen3:8b) loaded")
+    except Exception as e:
+        print(f"  ⚠️ Model warmup failed (non-critical): {e}")
+    print("🚀 Server ready! All models pre-loaded.")
+    
     yield
 
 app = FastAPI(lifespan=lifespan)
