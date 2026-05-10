@@ -76,17 +76,21 @@ def convert_audio(state):
                     # If already in an async context, create a task
                     import concurrent.futures
                     with concurrent.futures.ThreadPoolExecutor() as pool:
-                        transcript = pool.submit(asyncio.run, transcribe_audio_chunked(audio_bytes)).result()
+                        asr_result = pool.submit(asyncio.run, transcribe_audio_chunked(audio_bytes)).result()
                 except RuntimeError:
                     # No running loop — safe to use asyncio.run()
-                    transcript = asyncio.run(transcribe_audio_chunked(audio_bytes))
+                    asr_result = asyncio.run(transcribe_audio_chunked(audio_bytes))
                     
+                transcript = asr_result["text"]
+                asr_segments = asr_result["segments"]
+                
             except Exception as e:
                 logging.warning(f"⚠️ ASR service failed, falling back to local Whisper: {e}")
                 # Ultimate fallback — direct local whisper
                 segments_gen, _ = WHISPER_MODEL.transcribe(temp_path)
-                segments = list(segments_gen)
-                transcript = " ".join(seg.text.strip() for seg in segments)
+                segments_list = list(segments_gen)
+                transcript = " ".join(seg.text.strip() for seg in segments_list)
+                asr_segments = [{"start": seg.start, "end": seg.end, "text": seg.text} for seg in segments_list]
             
             # 4. Diarization (always local with pyannote)
             if duration < 10:
@@ -96,17 +100,14 @@ def convert_audio(state):
             logging.info("👥 Identifying speakers (this may take a few minutes)...")
             diarization = diarization_pipeline(temp_path)
             
-            # 5. Re-transcribe with segments for speaker alignment
-            # (We need word-level timing for diarization matching)
-            logging.info("🔗 Aligning transcript with speaker segments...")
-            segments_gen, _ = WHISPER_MODEL.transcribe(temp_path)
-            segments = list(segments_gen)
+            # 5. Align pre-transcribed segments with speaker diarization
+            logging.info("🔗 Aligning pre-transcribed segments with speaker diarization...")
             final_transcript = []
             
-            for segment in segments:
-                start_time = segment.start
-                end_time = segment.end
-                text = segment.text.strip()
+            for segment in asr_segments:
+                start_time = segment["start"]
+                end_time = segment["end"]
+                text = segment["text"].strip()
                 
                 try:
                     from pyannote.core import Segment as PyannoteSeg

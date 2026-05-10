@@ -47,7 +47,7 @@ async def transcribe_audio_chunked(audio_bytes: bytes) -> str:
         audio_bytes: Raw WAV audio bytes
         
     Returns:
-        Transcribed text string
+        Dict with "text" and "segments" (list of dicts with start, end, text)
     """
     file_size_mb = len(audio_bytes) / (1024 * 1024)
     logging.info(f"🎤 ASR chunked request — full audio size: {file_size_mb:.1f}MB")
@@ -64,15 +64,26 @@ async def transcribe_audio_chunked(audio_bytes: bytes) -> str:
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
     # 3. Reconstruct transcript
-    final_transcripts = []
+    final_text_parts = []
+    final_segments = []
+    
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             logging.error(f"❌ Chunk {i} permanently failed: {result}")
-            final_transcripts.append(f"[Unintelligible segment {i}]")
+            final_text_parts.append(f"[Unintelligible segment {i}]")
         else:
-            final_transcripts.append(result)
+            final_text_parts.append(result["text"])
+            chunk_start_time = chunks[i]["start_time"]
             
-    return " ".join(final_transcripts)
+            # Shift segments by chunk start time
+            for seg in result["segments"]:
+                final_segments.append({
+                    "start": seg["start"] + chunk_start_time,
+                    "end": seg["end"] + chunk_start_time,
+                    "text": seg["text"]
+                })
+                
+    return {"text": " ".join(final_text_parts), "segments": final_segments}
 
 
 async def _process_chunk_with_failover(chunk: dict) -> str:
@@ -149,7 +160,15 @@ async def _transcribe_groq(audio_bytes: bytes) -> str:
                         response_format="verbose_json",
                         language="en",
                     )
-                return transcription.text
+                
+                segments = []
+                for seg in getattr(transcription, 'segments', []):
+                    segments.append({
+                        "start": seg.get("start") if isinstance(seg, dict) else seg.start,
+                        "end": seg.get("end") if isinstance(seg, dict) else seg.end,
+                        "text": seg.get("text") if isinstance(seg, dict) else seg.text
+                    })
+                return {"text": transcription.text, "segments": segments}
             finally:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
@@ -195,8 +214,17 @@ async def _transcribe_local(audio_bytes: bytes) -> str:
 
             try:
                 segments_gen, _ = WHISPER_MODEL.transcribe(tmp_path)
-                segments = list(segments_gen)
-                return " ".join(seg.text.strip() for seg in segments)
+                segments_list = list(segments_gen)
+                text = " ".join(seg.text.strip() for seg in segments_list)
+                
+                segments = []
+                for seg in segments_list:
+                    segments.append({
+                        "start": seg.start,
+                        "end": seg.end,
+                        "text": seg.text
+                    })
+                return {"text": text, "segments": segments}
             finally:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)

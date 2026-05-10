@@ -116,10 +116,9 @@ class ProviderManager:
         else:
             self.providers = {
                 "groq": ProviderState(name=f"Groq-{name}"),
-                "huggingface": ProviderState(name=f"HuggingFace-{name}"),
                 "ollama": ProviderState(name=f"Ollama-{name}"),
             }
-            self.priority_order = ["groq", "huggingface", "ollama"]
+            self.priority_order = ["groq", "ollama"]
             
         logging.info(f"🧠 Provider Manager [{name}] initialized")
 

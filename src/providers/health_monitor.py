@@ -93,8 +93,8 @@ class HealthMonitor:
     async def _check_all_providers(self):
         """Check all unhealthy providers across all manager pools."""
         for manager in self._managers:
-            # We track "groq", "huggingface" (for LLMs), "ollama" (for LLMs), and "local_whisper" (for ASR)
-            for name in ["groq", "huggingface", "ollama", "local_whisper"]:
+            # We track "groq", "ollama" (for LLMs), and "local_whisper" (for ASR)
+            for name in ["groq", "ollama", "local_whisper"]:
                 state = manager.providers.get(name)
                 if not state:
                     continue
@@ -124,8 +124,6 @@ class HealthMonitor:
                 return await self._ping_groq()
             elif name == "ollama" or name == "local_whisper":
                 return await self._ping_local()
-            elif name == "huggingface":
-                return await self._ping_huggingface()
         except Exception as e:
             logging.debug(f"Health check failed for [{name}]: {e}")
             return False
@@ -146,23 +144,6 @@ class HealthMonitor:
         except:
             return False
             
-    async def _ping_huggingface(self) -> bool:
-        """Check if HuggingFace inference endpoint is responsive for LLMs."""
-        try:
-            # Pinging a standard endpoint instead of ASR since HF ASR is removed
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    "Authorization": f"Bearer {os.environ.get('HUGGING_FACE_ACCESS_TOKEN')}",
-                }
-                async with session.get(
-                    "https://huggingface.co/api/models/Qwen/Qwen3-8B",
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
-                    return resp.status == 200
-        except:
-            return False
-
     async def _ping_local(self) -> bool:
         """Check if local inference environment is responsive. Ollama is used as a proxy."""
         try:
