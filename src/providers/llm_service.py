@@ -100,6 +100,23 @@ def _get_chat_llm(provider: str):
         return LLAMA_MODEL
 
 
+def _clean_llm_output(text: str) -> str:
+    """
+    Cleans the LLM output by removing reasoning tags (<think>...</think>)
+    and extracting only the valid JSON block if present.
+    """
+    import re
+    # 1. Remove reasoning tags and their content
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    
+    # 2. Extract JSON block if it exists (look for { ... })
+    json_match = re.search(r'(\{.*\}|\[.*\])', text, re.DOTALL)
+    if json_match:
+        return json_match.group(0)
+    
+    return text.strip()
+
+
 # ─── Core Inference Functions ──────────────────────────────────────────────
 
 def invoke_generation(chain_builder, invoke_args: dict) -> str:
@@ -137,6 +154,7 @@ def invoke_generation(chain_builder, invoke_args: dict) -> str:
             llm = _get_generation_llm(provider)
             chain = chain_builder(llm)
             
+            # For Ollama, we use the standard invocation
             if provider == "ollama":
                 _local_llm_manager.acquire()
                 try:
@@ -144,8 +162,51 @@ def invoke_generation(chain_builder, invoke_args: dict) -> str:
                 finally:
                     _local_llm_manager.release()
             else:
-                result = chain.invoke(invoke_args)
-                
+                # For Cloud (Groq/HF), we add a safety layer to handle <think> tags and noise
+                try:
+                    result = chain.invoke(invoke_args)
+                except Exception as e:
+                    # If it's a parsing error, we try to recover the raw text and clean it
+                    error_str = str(e)
+                    if "invalid json" in error_str.lower() or "parsing" in error_str.lower():
+                        logging.warning(f"⚠️ [{provider}] parsing failed, attempting recovery...")
+                        
+                        # We need to get the raw text. We'll re-run with a string parser.
+                        # This is the safest way to ensure we get exactly what the LLM sent.
+                        from langchain_core.output_parsers import StrOutputParser
+                        # We reconstruct the chain part by part if possible, 
+                        # but since we have a lambda, we'll just try to reach into the exception
+                        # if it contains the output, or re-run.
+                        
+                        # Re-running is slightly slower but 100% reliable for recovery.
+                        # We use the same prompt and LLM but a string parser.
+                        # Note: We need a way to get the prompt from the chain_builder.
+                        # Since we can't easily, we'll look for 'output' in the exception.
+                        
+                        # Most LangChain parsers include the output in the error message
+                        # or as an attribute.
+                        output = None
+                        if hasattr(e, 'llm_output'):
+                            output = e.llm_output
+                        elif "got:" in error_str:
+                            output = error_str.split("got:")[1]
+                        
+                        if output:
+                            cleaned_output = _clean_llm_output(output)
+                            # Now we need the parser to turn it into an object
+                            # We can extract the parser from the chain!
+                            # Chain is usually Prompt | LLM | Parser
+                            if hasattr(chain, 'last'):
+                                parser = chain.last
+                                result = parser.parse(cleaned_output)
+                                logging.info(f"✅ Recovered from [{provider}] parsing error after cleaning.")
+                            else:
+                                raise e
+                        else:
+                            raise e
+                    else:
+                        raise e
+
             latency_ms = (time.monotonic() - start) * 1000
             
             generation_provider_manager.record_success(provider, latency_ms)

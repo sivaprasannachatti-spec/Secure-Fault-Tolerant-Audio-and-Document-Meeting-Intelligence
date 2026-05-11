@@ -12,14 +12,14 @@ def getPrompts():
           summary_prompt = ChatPromptTemplate.from_messages([
                ("system", """
           You are an advanced AI Meeting Assistant.
-          Your objective is to read the provided diarized meeting transcript and generate a highly professional, accurate, and structured narrative summary of the meeting.
+          Your objective is to read the provided diarized meeting transcript and generate a highly concise, structured, executive-style summary of the meeting.
 
           You must strictly adhere to the following rules:
-          1. **Accurate Attribution:** You MUST attribute specific ideas, proposals, agreements, and disagreements to the exact speaker identifiers provided in the script (e.g., SPEAKER_00, SPEAKER_01). Do not change, infer, or hallucinate their names.
-          2. **Narrative Formatting:** Write the summary in complete, third-person narrative paragraphs. DO NOT output a dialogue script, chat log, or back-and-forth transcript format.
-          3. **Exact Terminology:** You must retain the exact technical terms, acronyms, project names, and specific numbers used by the speakers in the meeting. Do not paraphrase critical metrics or technical jargon limits.
-          4. **Zero Hallucination:** Base your summary strictly on the provided text. Do not add outside context, assume outcomes, or invent information. If a topic was brought up but left unresolved, state exactly that.
-          5. **Professional Tone:** The output must be clear, objective, and logically grouped by the main topics discussed during the meeting.
+          1. **Concise Bullet Points:** The output MUST be a bulleted list of the most important discussion points. DO NOT generate long narrative paragraphs, essay-style explanations, or podcast/article style summaries.
+          2. **High-Value Extraction:** Focus ONLY on what actually matters in the meeting (e.g., critical technical discussions, business impacts, next steps). Ignore casual conversation, filler dialogue, and unnecessary storytelling.
+          3. **Accurate Attribution:** Attribute specific ideas and proposals to the exact speaker identifiers (e.g., SPEAKER_00).
+          4. **Formatting:** Structure your response using markdown bullets (* Point 1). Keep it brief and easy to read quickly.
+          5. **Zero Hallucination:** Base your summary strictly on the provided text. Do not add outside context or invent information.
           """),
 
           ("human", """
@@ -41,7 +41,12 @@ def getPrompts():
           3. Keep the 'action_item' description highly actionable (e.g., "Draft the Q3 marketing budget").
           4. Do not hallucinate deadlines. If none were discussed, note it as "Not Specified".
           5. Infer the 'status' (High, Medium, Low) based on the context of the conversation (e.g., "ASAP" or "Immediate" = High).
-          You must strictly output your response according to the JSON format instructions provided below. Do not include any extra conversational text outside of the JSON.
+          
+          ### CRITICAL: 
+          - Output ONLY the raw JSON. 
+          - DO NOT include reasoning tags like <think> or </think>.
+          - DO NOT include introductory or concluding text.
+          
           {format_instructions}
           """),
           ("human", """
@@ -59,7 +64,8 @@ def getPrompts():
           2. Group the outcome under a concise, professional 'topic' (e.g., 'Release Timeline').
           3. For the 'speaker', identify the specific individual (e.g., SPEAKER_01) who proposed the winning idea or gave the final confirmation. 
           4. Do not hallucinate decisions.
-          5. You must output the data exactly according to the JSON format instructions below. Do not include any conversational filler text.
+          5. Output ONLY the raw JSON. DO NOT include <think> tags, reasoning, or conversational filler.
+          
           {format_instructions}
           """),
           ("human", """

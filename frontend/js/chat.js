@@ -760,27 +760,53 @@ document.addEventListener('DOMContentLoaded', async () => {
                 throw new Error(errorData.detail || "Upload failed");
             }
             
-            const data = await res.json();
+            // Process SSE Stream
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-            // SUCCESS! Since backend is synchronous, we have the result now
-            clearInterval(activeTimerInterval);
-            
-            const reportDiv = containerElement.closest('.message-box').querySelector('.message-content');
-            
-            addThoughtStep(stepsElement, "<strong>Synthesis Complete.</strong>");
-            containerElement.removeAttribute('open');
-            
-            iconElement.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`;
-            titleElement.innerText = "Synthesized Meeting";
-            
-            reportDiv.style.display = 'block';
-            reportDiv.innerHTML = renderMeetingReport(data.final_report);
-            
-            currentMeetingId = data.meeting_id;
-            clearActiveProcess();
-            loadChatHistory();
-            loadAllMeetings();
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Keep incomplete line in buffer
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const dataStr = line.slice(6).trim();
+                    if (dataStr === '[DONE]') break;
+
+                    try {
+                        const parsed = JSON.parse(dataStr);
+                        
+                        // We only care about the final saved stage
+                        if (parsed.stage === 'saved') {
+                            clearInterval(activeTimerInterval);
+                            
+                            const reportDiv = containerElement.closest('.message-box').querySelector('.message-content');
+                            
+                            addThoughtStep(stepsElement, "<strong>Synthesis Complete.</strong>");
+                            containerElement.removeAttribute('open');
+                            
+                            iconElement.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`;
+                            titleElement.innerText = "Synthesized Meeting";
+                            
+                            reportDiv.style.display = 'block';
+                            reportDiv.innerHTML = renderMeetingReport(parsed.final_report);
+                            
+                            currentMeetingId = parsed.meeting_id;
+                            clearActiveProcess();
+                            loadChatHistory();
+                            loadAllMeetings();
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                        }
+                    } catch (e) {
+                        // Ignore malformed SSE lines
+                    }
+                }
+            }
 
         } catch (error) {
             console.error('File upload failed:', error);

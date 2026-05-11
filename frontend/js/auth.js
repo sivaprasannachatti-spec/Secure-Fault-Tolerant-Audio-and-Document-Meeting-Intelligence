@@ -59,12 +59,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 
                 if (res.ok) {
-                    localStorage.setItem('isAuthenticated', 'true');
-                    localStorage.setItem('userName', name);
-                    showSuccess("Account created! Logging you in...");
-                    setTimeout(() => {
-                        window.location.replace('chat.html');
-                    }, 500);
+                    // Automatically log in the user to get the JWT cookie
+                    const loginRes = await fetch(`${API_BASE_URL}/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({ email, dept })
+                    });
+                    
+                    if (loginRes.ok) {
+                        localStorage.setItem('isAuthenticated', 'true');
+                        localStorage.setItem('userName', name);
+                        showSuccess("Account created! Logging you in...");
+                        setTimeout(() => {
+                            window.location.replace('chat.html');
+                        }, 500);
+                    } else {
+                        showError("Account created, but automatic login failed. Please log in.");
+                    }
                 } else {
                     showError(data.detail || 'Signup failed. Please try again.');
                 }
