@@ -109,16 +109,17 @@ class ProviderManager:
         # We handle the specific provider names differently if it's the ASR manager.
         if name == "ASR":
             self.providers = {
-                "groq": ProviderState(name=f"Groq-{name}"),
-                "local_whisper": ProviderState(name=f"LocalWhisper-{name}"),
+                "assemblyai": ProviderState(name=f"AssemblyAI-{name}"),
+                "deepgram": ProviderState(name=f"Deepgram-{name}"),
             }
-            self.priority_order = ["groq", "local_whisper"]
+            self.priority_order = ["assemblyai", "deepgram"]
         else:
             self.providers = {
                 "groq": ProviderState(name=f"Groq-{name}"),
+                "huggingface": ProviderState(name=f"HuggingFace-{name}"),
                 "ollama": ProviderState(name=f"Ollama-{name}"),
             }
-            self.priority_order = ["groq", "ollama"]
+            self.priority_order = ["groq", "huggingface", "ollama"]
             
         logging.info(f"🧠 Provider Manager [{name}] initialized")
 
@@ -135,9 +136,9 @@ class ProviderManager:
 
             # All cloud providers down — force fallback
             if self.name == "ASR":
-                logging.warning("⚠️ All cloud ASR providers unavailable — forcing Local Whisper fallback")
-                self.providers["local_whisper"].status = ProviderStatus.HEALTHY
-                return "local_whisper"
+                logging.warning("⚠️ All ASR providers unavailable — forcing Deepgram fallback")
+                self.providers["deepgram"].status = ProviderStatus.HEALTHY
+                return "deepgram"
             else:
                 logging.warning("⚠️ All cloud LLM providers unavailable — forcing Ollama fallback")
                 self.providers["ollama"].status = ProviderStatus.HEALTHY

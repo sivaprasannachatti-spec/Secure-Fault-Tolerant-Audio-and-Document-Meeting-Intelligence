@@ -17,5 +17,6 @@ PyJWT
 noisereduce
 python-multipart
 faster-whisper
-# -e .
+langchain-huggingface
 psutil
+# -e .

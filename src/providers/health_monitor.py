@@ -93,8 +93,8 @@ class HealthMonitor:
     async def _check_all_providers(self):
         """Check all unhealthy providers across all manager pools."""
         for manager in self._managers:
-            # We track "groq", "ollama" (for LLMs), and "local_whisper" (for ASR)
-            for name in ["groq", "ollama", "local_whisper"]:
+            # We track all cloud providers and ollama
+            for name in ["groq", "huggingface", "assemblyai", "deepgram", "ollama"]:
                 state = manager.providers.get(name)
                 if not state:
                     continue
@@ -122,7 +122,13 @@ class HealthMonitor:
         try:
             if name == "groq":
                 return await self._ping_groq()
-            elif name == "ollama" or name == "local_whisper":
+            elif name == "huggingface":
+                return await self._ping_huggingface()
+            elif name == "assemblyai":
+                return await self._ping_assemblyai()
+            elif name == "deepgram":
+                return await self._ping_deepgram()
+            elif name == "ollama":
                 return await self._ping_local()
         except Exception as e:
             logging.debug(f"Health check failed for [{name}]: {e}")
@@ -137,6 +143,50 @@ class HealthMonitor:
                 }
                 async with session.get(
                     "https://api.groq.com/openai/v1/models",
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    return resp.status == 200
+        except:
+            return False
+
+    async def _ping_huggingface(self) -> bool:
+        """Check if HuggingFace inference endpoint is responsive."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {
+                    "Authorization": f"Bearer {os.environ.get('HUGGING_FACE_ACCESS_TOKEN')}",
+                }
+                async with session.get(
+                    "https://huggingface.co/api/models/Qwen/Qwen3-8B",
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    return resp.status == 200
+        except:
+            return False
+
+    async def _ping_assemblyai(self) -> bool:
+        """Check if AssemblyAI API is responsive."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {"Authorization": f"{os.environ.get('ASSEMBLYAI_API_KEY')}"}
+                async with session.get(
+                    "https://api.assemblyai.com/v2/account",
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    return resp.status == 200
+        except:
+            return False
+
+    async def _ping_deepgram(self) -> bool:
+        """Check if Deepgram API is responsive."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {"Authorization": f"Token {os.environ.get('DEEPGRAM_API_KEY')}"}
+                async with session.get(
+                    "https://api.deepgram.com/v1/projects",
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=10)
                 ) as resp:

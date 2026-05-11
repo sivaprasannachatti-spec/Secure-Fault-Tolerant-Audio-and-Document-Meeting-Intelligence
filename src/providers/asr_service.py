@@ -1,106 +1,152 @@
 """
-ASR Service — Multi-provider audio transcription with automatic failover.
-
-Priority chain:
-  1. Groq Whisper Large v3 (fastest, cloud)
-  2. Local faster-whisper (always works, CPU, dynamic concurrency)
+ASR Service — Fast audio transcription and diarization using AssemblyAI.
+Falls back to Deepgram Nova-3 if AssemblyAI fails or runs out of credits.
 """
 
 import os
 import time
 import asyncio
-import tempfile
-import aiohttp
-import traceback
-from concurrent.futures import ThreadPoolExecutor
+import httpx
 
 from src.logger import logging
 from src.providers.provider_manager import provider_manager
-from src.components.audio_chunker import audio_chunker
-from src.providers.health_monitor import health_monitor
+from src.exception import CustomException
+import sys
 
-# Thread pool for running synchronous local inference without blocking
-# We use a larger max_workers but restrict active inference using dynamic semaphores
-_thread_pool = ThreadPoolExecutor(max_workers=8, thread_name_prefix="asr-local")
+# We reuse the ASR provider manager (AssemblyAI -> Deepgram)
+asr_provider_manager = provider_manager
 
-# Groq concurrency (higher since it's an API)
-_groq_semaphore = asyncio.Semaphore(10)
-
-# Groq client (lazy-initialized)
-_groq_client = None
-
-def _get_groq_client():
-    """Lazy-initialize the Groq client."""
-    global _groq_client
-    if _groq_client is None:
-        from groq import Groq
-        _groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-    return _groq_client
-
-async def transcribe_audio_chunked(audio_bytes: bytes) -> str:
-    """
-    Main entry point for ASR. Splits audio into chunks, processes them
-    concurrently using the best available provider, and handles failovers
-    mid-transcription by reusing the same chunks.
-    
-    Args:
-        audio_bytes: Raw WAV audio bytes
+async def _invoke_assemblyai(audio_bytes: bytes) -> str:
+    """Upload and transcribe via AssemblyAI Universal-1 with Diarization."""
+    api_key = os.environ.get("ASSEMBLYAI_API_KEY")
+    if not api_key:
+        raise ValueError("ASSEMBLYAI_API_KEY is not set.")
         
-    Returns:
-        Dict with "text" and "segments" (list of dicts with start, end, text)
-    """
-    file_size_mb = len(audio_bytes) / (1024 * 1024)
-    logging.info(f"🎤 ASR chunked request — full audio size: {file_size_mb:.1f}MB")
-
-    # 1. Chunk the audio (cache in memory)
-    chunks = audio_chunker.split_audio_into_chunks(audio_bytes, chunk_duration_sec=60)
+    headers = {"authorization": api_key}
     
-    # 2. Process chunks concurrently
-    tasks = []
-    for chunk in chunks:
-        tasks.append(_process_chunk_with_failover(chunk))
-        
-    # Wait for all chunks to finish
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    # 3. Reconstruct transcript
-    final_text_parts = []
-    final_segments = []
-    
-    for i, result in enumerate(results):
-        if isinstance(result, Exception):
-            logging.error(f"❌ Chunk {i} permanently failed: {result}")
-            final_text_parts.append(f"[Unintelligible segment {i}]")
-        else:
-            final_text_parts.append(result["text"])
-            chunk_start_time = chunks[i]["start_time"]
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        # 1. Upload audio
+        upload_resp = await client.post(
+            "https://api.assemblyai.com/v2/upload",
+            headers=headers,
+            content=audio_bytes
+        )
+        if upload_resp.status_code != 200:
+            if upload_resp.status_code == 402:
+                raise Exception("402 Payment Required: AssemblyAI out of credits.")
+            raise Exception(f"AssemblyAI upload failed: {upload_resp.text}")
             
-            # Shift segments by chunk start time
-            for seg in result["segments"]:
-                final_segments.append({
-                    "start": seg["start"] + chunk_start_time,
-                    "end": seg["end"] + chunk_start_time,
-                    "text": seg["text"]
-                })
+        upload_url = upload_resp.json()["upload_url"]
+        
+        # 2. Start transcription job
+        transcribe_resp = await client.post(
+            "https://api.assemblyai.com/v2/transcript",
+            headers=headers,
+            json={
+                "audio_url": upload_url,
+                "speech_model": "best",  # Universal-1
+                "speaker_labels": True
+            }
+        )
+        if transcribe_resp.status_code != 200:
+            raise Exception(f"AssemblyAI start failed: {transcribe_resp.text}")
+            
+        transcript_id = transcribe_resp.json()["id"]
+        
+        # 3. Poll for completion
+        while True:
+            poll_resp = await client.get(
+                f"https://api.assemblyai.com/v2/transcript/{transcript_id}",
+                headers=headers
+            )
+            status = poll_resp.json()["status"]
+            
+            if status == "completed":
+                # Build formatted transcript
+                words = poll_resp.json().get("words", [])
+                if not words:
+                    return ""
                 
-    return {"text": " ".join(final_text_parts), "segments": final_segments}
+                final_transcript = []
+                current_speaker = words[0]["speaker"]
+                current_text = []
+                
+                for word in words:
+                    if word["speaker"] != current_speaker:
+                        final_transcript.append(f"SPEAKER_{current_speaker}: {' '.join(current_text)}")
+                        current_speaker = word["speaker"]
+                        current_text = [word["text"]]
+                    else:
+                        current_text.append(word["text"])
+                
+                final_transcript.append(f"SPEAKER_{current_speaker}: {' '.join(current_text)}")
+                return "\n".join(final_transcript)
+                
+            elif status == "error":
+                raise Exception(f"AssemblyAI processing error: {poll_resp.json()['error']}")
+                
+            await asyncio.sleep(3)
 
 
-async def _process_chunk_with_failover(chunk: dict) -> str:
+async def _invoke_deepgram(audio_bytes: bytes) -> str:
+    """Transcribe via Deepgram Nova-3 with Diarization."""
+    api_key = os.environ.get("DEEPGRAM_API_KEY")
+    if not api_key:
+        raise ValueError("DEEPGRAM_API_KEY is not set.")
+        
+    headers = {
+        "Authorization": f"Token {api_key}",
+        "Content-Type": "audio/wav"
+    }
+    
+    params = {
+        "model": "nova-3",
+        "diarize": "true",
+        "punctuate": "true"
+    }
+    
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        resp = await client.post(
+            "https://api.deepgram.com/v1/listen",
+            headers=headers,
+            params=params,
+            content=audio_bytes
+        )
+        
+        if resp.status_code != 200:
+            if resp.status_code == 402 or resp.status_code == 403:
+                raise Exception("402/403 Payment Required: Deepgram out of credits.")
+            raise Exception(f"Deepgram failed: {resp.text}")
+            
+        data = resp.json()
+        try:
+            paragraphs = data["results"]["channels"][0]["alternatives"][0]["paragraphs"]["paragraphs"]
+            final_transcript = []
+            for p in paragraphs:
+                speaker = p["speaker"]
+                text = " ".join([word["punctuated_word"] for sent in p["sentences"] for word in sent["words"]])
+                final_transcript.append(f"SPEAKER_{speaker}: {text}")
+            return "\n".join(final_transcript)
+        except KeyError:
+            # Fallback if diarization data structure is slightly different or missing
+            return data["results"]["channels"][0]["alternatives"][0]["transcript"]
+
+
+async def transcribe_audio_full(audio_bytes: bytes) -> str:
     """
-    Process a single chunk through the provider fallback chain.
+    Transcribe and diarize audio using AssemblyAI or Deepgram with automatic failover.
     """
-    chunk_index = chunk["index"]
-    chunk_bytes = chunk["bytes"]
     last_error = None
     tried_providers = set()
 
+    file_size_mb = len(audio_bytes) / (1024 * 1024)
+    logging.info(f"🎤 ASR request — full audio size: {file_size_mb:.1f}MB")
+
     for attempt in range(3):
-        provider = provider_manager.select_provider()
+        provider = asr_provider_manager.select_provider()
         
-        # Skip if already tried this provider for this specific chunk
         if provider in tried_providers:
-            for fallback in provider_manager.priority_order:
+            for fallback in asr_provider_manager.priority_order:
                 if fallback not in tried_providers:
                     provider = fallback
                     break
@@ -108,146 +154,35 @@ async def _process_chunk_with_failover(chunk: dict) -> str:
                 break
         
         tried_providers.add(provider)
-        logging.info(f"🎤 Chunk {chunk_index} attempt {attempt + 1}/3 — using [{provider}]")
+        logging.info(f"==================================================")
+        logging.info(f"🎤 ASR ROUTING -> USING PROVIDER: [{provider.upper()}]")
+        logging.info(f"==================================================")
 
         try:
             start = time.monotonic()
-
-            if provider == "groq":
-                result = await _transcribe_groq(chunk_bytes)
-            else:
-                result = await _transcribe_local(chunk_bytes)
-
-            latency_ms = (time.monotonic() - start) * 1000
-            provider_manager.record_success(provider, latency_ms)
-            logging.info(f"✅ Chunk {chunk_index} completed via [{provider}] in {latency_ms:.0f}ms")
-            return result
-
-        except RateLimitError as e:
-            reset_after = getattr(e, 'reset_after', 60.0)
-            provider_manager.mark_rate_limited(provider, reset_after)
-            last_error = e
-            logging.warning(f"⚠️ [{provider}] rate limited on chunk {chunk_index}, switching provider...")
-            continue
-
-        except Exception as e:
-            provider_manager.record_failure(provider, type(e).__name__)
-            last_error = e
-            logging.error(f"❌ [{provider}] ASR failed on chunk {chunk_index}: {e}")
-            continue
-
-    raise ASRError(f"All ASR providers failed for chunk {chunk_index}. Last error: {last_error}")
-
-
-# ─── Provider-Specific Implementations ─────────────────────────────────────
-
-async def _transcribe_groq(audio_bytes: bytes) -> str:
-    """Groq Whisper Large v3 — cloud, fastest."""
-    loop = asyncio.get_event_loop()
-
-    async def _do_groq():
-        def _sync_groq():
-            client = _get_groq_client()
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-
-            try:
-                with open(tmp_path, "rb") as audio_file:
-                    transcription = client.audio.transcriptions.create(
-                        model="whisper-large-v3-turbo",
-                        file=audio_file,
-                        response_format="verbose_json",
-                        language="en",
-                    )
-                
-                segments = []
-                for seg in getattr(transcription, 'segments', []):
-                    segments.append({
-                        "start": seg.get("start") if isinstance(seg, dict) else seg.start,
-                        "end": seg.get("end") if isinstance(seg, dict) else seg.end,
-                        "text": seg.get("text") if isinstance(seg, dict) else seg.text
-                    })
-                return {"text": transcription.text, "segments": segments}
-            finally:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-
-        try:
-            # Note: Groq SDK can throw a variety of errors, wrapped in run_in_executor
-            return await asyncio.wait_for(
-                loop.run_in_executor(_thread_pool, _sync_groq),
-                timeout=60.0
-            )
-        except asyncio.TimeoutError:
-            raise TimeoutError("Groq transcription timed out after 60s")
-        except Exception as e:
-            err_str = str(e).lower()
-            if "rate limit" in err_str or "429" in err_str:
-                raise RateLimitError("Groq rate limited")
-            raise ProviderError(str(e))
-
-    async with _groq_semaphore:
-        return await _do_groq()
-
-
-async def _transcribe_local(audio_bytes: bytes) -> str:
-    """Local faster-whisper — CPU fallback, respects dynamic concurrency."""
-    loop = asyncio.get_event_loop()
-
-    # Get dynamic limit from psutil-based health monitor
-    limit = health_monitor.get_local_concurrency_limit()
-    
-    # We create a temporary semaphore for this evaluation context 
-    # to enforce system-wide dynamic limits per-request tick
-    # In a real heavy system we'd manage a shared global semaphore that adjusts size,
-    # but here limiting active threads in the executor dynamically works well.
-    local_sem = asyncio.Semaphore(limit)
-
-    async with local_sem:
-        def _sync_local():
-            from src.utils import WHISPER_MODEL
             
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-
-            try:
-                segments_gen, _ = WHISPER_MODEL.transcribe(tmp_path)
-                segments_list = list(segments_gen)
-                text = " ".join(seg.text.strip() for seg in segments_list)
+            if provider == "assemblyai":
+                transcript = await _invoke_assemblyai(audio_bytes)
+            elif provider == "deepgram":
+                transcript = await _invoke_deepgram(audio_bytes)
+            else:
+                raise ValueError(f"Unknown ASR provider: {provider}")
                 
-                segments = []
-                for seg in segments_list:
-                    segments.append({
-                        "start": seg.start,
-                        "end": seg.end,
-                        "text": seg.text
-                    })
-                return {"text": text, "segments": segments}
-            finally:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
+            latency_ms = (time.monotonic() - start) * 1000
+            asr_provider_manager.record_success(provider, latency_ms)
+            logging.info(f"✅ ASR completed via [{provider.upper()}] in {latency_ms:.0f}ms")
+            
+            return transcript
 
-        return await loop.run_in_executor(_thread_pool, _sync_local)
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "rate limit" in error_msg or "429" in error_msg or "402" in error_msg or "payment required" in error_msg or "403" in error_msg:
+                asr_provider_manager.mark_rate_limited(provider, 300.0) # wait 5 minutes if out of credits
+                logging.warning(f"⚠️ [{provider}] rate limited or out of credits, switching provider...")
+            else:
+                asr_provider_manager.record_failure(provider, type(e).__name__)
+                logging.error(f"❌ [{provider}] ASR failed: {e}")
+            last_error = e
+            continue
 
-
-# ─── Custom Exceptions ─────────────────────────────────────────────────────
-
-class ASRError(Exception):
-    """All ASR providers failed."""
-    pass
-
-class RateLimitError(Exception):
-    """Provider returned 429."""
-    def __init__(self, message, reset_after=60.0):
-        super().__init__(message)
-        self.reset_after = reset_after
-
-class ServiceUnavailableError(Exception):
-    """Provider returned 503."""
-    pass
-
-class ProviderError(Exception):
-    """Generic provider error."""
-    pass
+    raise Exception(f"All ASR providers failed. Last error: {last_error}")

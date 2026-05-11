@@ -63,6 +63,15 @@ def _get_generation_llm(provider: str):
             api_key=os.environ.get("GROQ_API_KEY"),
             temperature=0.6,
         )
+    elif provider == "huggingface":
+        from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+        llm = HuggingFaceEndpoint(
+            repo_id="Qwen/Qwen3-8B",
+            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
+            task="text-generation",
+            max_new_tokens=2048,
+        )
+        return ChatHuggingFace(llm=llm)
     else:
         from src.utils import QWEN_MODEL
         return QWEN_MODEL
@@ -77,6 +86,15 @@ def _get_chat_llm(provider: str):
             api_key=os.environ.get("GROQ_API_KEY"),
             temperature=0.7,
         )
+    elif provider == "huggingface":
+        from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+        llm = HuggingFaceEndpoint(
+            repo_id="mistralai/Mistral-7B-Instruct-v0.2",
+            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
+            task="text-generation",
+            max_new_tokens=2048,
+        )
+        return ChatHuggingFace(llm=llm)
     else:
         from src.utils import LLAMA_MODEL
         return LLAMA_MODEL
@@ -110,7 +128,9 @@ def invoke_generation(chain_builder, invoke_args: dict) -> str:
                 break
         
         tried_providers.add(provider)
-        logging.info(f"🧠 Generation attempt {attempt + 1}/3 — using [{provider}]")
+        logging.info(f"==================================================")
+        logging.info(f"🧠 GENERATION ROUTING -> USING PROVIDER: [{provider.upper()}]")
+        logging.info(f"==================================================")
 
         try:
             start = time.monotonic()
@@ -166,7 +186,9 @@ def invoke_chat(chain_builder, invoke_args: dict):
                 break
         
         tried_providers.add(provider)
-        logging.info(f"💬 Chat attempt {attempt + 1}/3 — using [{provider}]")
+        logging.info(f"==================================================")
+        logging.info(f"💬 CHAT ROUTING -> USING PROVIDER: [{provider.upper()}]")
+        logging.info(f"==================================================")
 
         try:
             start = time.monotonic()
@@ -221,7 +243,9 @@ def stream_chat(chain_builder, invoke_args: dict):
                 break
         
         tried_providers.add(provider)
-        logging.info(f"💬 Chat stream attempt {attempt + 1}/3 — using [{provider}]")
+        logging.info(f"==================================================")
+        logging.info(f"💬 CHAT STREAM ROUTING -> USING PROVIDER: [{provider.upper()}]")
+        logging.info(f"==================================================")
 
         try:
             start = time.monotonic()

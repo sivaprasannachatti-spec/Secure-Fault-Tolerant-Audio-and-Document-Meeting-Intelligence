@@ -1,18 +1,12 @@
 import sys
-import librosa
 import os
-import torch
 import traceback
-import tempfile
 
-from faster_whisper import WhisperModel
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from pydantic import BaseModel, Field
 from langchain_classic.output_parsers import StructuredOutputParser, ResponseSchema, PydanticOutputParser
 from src.exception import CustomException
 from src.logger import logging
-from pyannote.audio import Pipeline
-from pyannote.core import Segment
 from src.prompts.prompts import getPrompts
 from langchain_ollama import ChatOllama
 from langchain_groq import ChatGroq
@@ -28,108 +22,39 @@ QWEN_MODEL = ChatOllama(model='qwen3:8b', keep_alive=-1)
 LLAMA_MODEL = ChatOllama(model='llama3.2:3b', keep_alive=-1)
 PHI_MODEL = ChatOllama(model='phi4-mini', keep_alive=-1)
 
-# Global Model Loading (Initialized once on startup)
-print("📦 Loading AI Models (Whisper & Diarization)...")
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"🖥️ Using device: {device}")
-
-compute_type = "float16" if torch.cuda.is_available() else "int8"
-WHISPER_MODEL = WhisperModel("base", device="cuda" if torch.cuda.is_available() else "cpu", compute_type=compute_type)
-
-DIARIZATION_PIPELINE = Pipeline.from_pretrained(
-    "pyannote/speaker-diarization-3.1",
-    token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN")
-).to(device=device)
+# Pyannote and local Whisper have been removed to save RAM.
+# AssemblyAI and Deepgram now handle transcription and diarization natively.
 
 def convert_audio(state):
     try:
-        # Use globally loaded diarization pipeline
-        diarization_pipeline = DIARIZATION_PIPELINE
-        
         # 1. Grab the raw audio bytes from the State
         audio_bytes = state.get('cleaned_audio')
         
         if not audio_bytes:
             print("❌ Error: No audio bytes provided in state.")
             return {"converted_audio": "ERROR: No audio bytes found"}
-        
-        # 2. Write bytes to temp file (needed for diarization)
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-            temp_audio.write(audio_bytes)
-            temp_path = temp_audio.name
+            
+        logging.info("🎤 Sending audio to AssemblyAI/Deepgram orchestrator...")
         
         try:
-            logging.info(f"✅ Loaded raw bytes into temporary file: {temp_path}")
+            import asyncio
+            from src.providers.asr_service import transcribe_audio_full
             
-            duration = librosa.get_duration(path=temp_path)
-            logging.info(f"⏱️ Audio duration: {duration:.2f} seconds")
-            
-            # 3. Transcription via multi-provider ASR service (Groq → HF → Local)
-            logging.info("🎤 Transcribing audio via ASR orchestration...")
+            # Run async transcription from sync context
             try:
-                import asyncio
-                from src.providers.asr_service import transcribe_audio_chunked
+                loop = asyncio.get_running_loop()
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    final_transcript = pool.submit(asyncio.run, transcribe_audio_full(audio_bytes)).result()
+            except RuntimeError:
+                final_transcript = asyncio.run(transcribe_audio_full(audio_bytes))
                 
-                # Run async transcription from sync context
-                try:
-                    loop = asyncio.get_running_loop()
-                    # If already in an async context, create a task
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as pool:
-                        asr_result = pool.submit(asyncio.run, transcribe_audio_chunked(audio_bytes)).result()
-                except RuntimeError:
-                    # No running loop — safe to use asyncio.run()
-                    asr_result = asyncio.run(transcribe_audio_chunked(audio_bytes))
-                    
-                transcript = asr_result["text"]
-                asr_segments = asr_result["segments"]
-                
-            except Exception as e:
-                logging.warning(f"⚠️ ASR service failed, falling back to local Whisper: {e}")
-                # Ultimate fallback — direct local whisper
-                segments_gen, _ = WHISPER_MODEL.transcribe(temp_path)
-                segments_list = list(segments_gen)
-                transcript = " ".join(seg.text.strip() for seg in segments_list)
-                asr_segments = [{"start": seg.start, "end": seg.end, "text": seg.text} for seg in segments_list]
+        except Exception as e:
+            logging.error(f"⚠️ ASR service failed: {e}")
+            return {"converted_audio": f"ERROR: {str(e)}"}
             
-            # 4. Diarization (always local with pyannote)
-            if duration < 10:
-                logging.info("⚠️ Audio too short for diarization, using transcription only.")
-                return {"converted_audio": f"SPEAKER_00: {transcript}"}
-            
-            logging.info("👥 Identifying speakers (this may take a few minutes)...")
-            diarization = diarization_pipeline(temp_path)
-            
-            # 5. Align pre-transcribed segments with speaker diarization
-            logging.info("🔗 Aligning pre-transcribed segments with speaker diarization...")
-            final_transcript = []
-            
-            for segment in asr_segments:
-                start_time = segment["start"]
-                end_time = segment["end"]
-                text = segment["text"].strip()
-                
-                try:
-                    from pyannote.core import Segment as PyannoteSeg
-                    intersection = diarization.crop(PyannoteSeg(start_time, end_time))
-                    active_speakers = intersection.labels()
-                    
-                    if active_speakers:
-                        speaker = active_speakers[0]
-                    else:
-                        speaker = "UNKNOWN"
-                except Exception as e:
-                    logging.error(f"Speaker detection error: {e}")
-                    speaker = "UNKNOWN"
-                    
-                final_transcript.append(f"{speaker}: {text}")
-            
-            logging.info("✅ Transcription & Diarization Complete.")
-            return {"converted_audio": "\n".join(final_transcript)}
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-                print("🧹 Cleaned up temporary audio file.")
+        logging.info("✅ Transcription & Diarization Complete.")
+        return {"converted_audio": final_transcript}
     
     except Exception as e:
         print(f"❌ Error in convert_audio: {str(e)}")
