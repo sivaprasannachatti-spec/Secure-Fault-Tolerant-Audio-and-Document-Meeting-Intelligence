@@ -3,10 +3,10 @@ LLM Service — Multi-provider LLM inference with automatic failover.
 
 Supports two independent LLM pools:
   - Generation Pool (summary, actions, decisions, meeting titles):
-      Groq qwen3-32b → HF Qwen3-8B → Local Ollama qwen3:8b
+      Groq qwen3-32b -> HF Qwen3-8B -> Local Ollama qwen3:8b
   
   - Chat Pool (conversational responses, chat titles):
-      Groq llama-3.3-70b → HF Mistral-7B-Instruct → Local Ollama llama3.2:3b
+      Groq llama-3.3-70b -> HF Mistral-7B-Instruct -> Local Ollama llama3.2:3b
 """
 
 import os
@@ -14,16 +14,25 @@ import time
 import asyncio
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-
+from langchain_groq import ChatGroq
+from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from dotenv import load_dotenv
+
+# Optional HuggingFace Import
+try:
+    from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+    HF_AVAILABLE = True
+except ImportError:
+    HF_AVAILABLE = False
 
 from src.logger import logging
 from src.providers.provider_manager import ProviderManager, ProviderStatus
 from src.providers.health_monitor import health_monitor
 import threading
 
-# ─── Separate Provider Managers for each LLM pool ──────────────────────────
+# --- Separate Provider Managers for each LLM pool --------------------------
 
 generation_provider_manager = ProviderManager(name="LLM-Generation")
 chat_provider_manager = ProviderManager(name="LLM-Chat")
@@ -52,24 +61,33 @@ class DynamicConcurrencyManager:
 _local_llm_manager = DynamicConcurrencyManager()
 
 
-# ─── LLM Factory — returns the right model for the given provider ──────────
+# --- LLM Factory — returns the right model for the given provider ----------
 
-def _get_generation_llm(provider: str):
-    """Get the LLM model for generation tasks based on provider."""
+def get_generation_model(provider: str, task_type: str = "summary"):
+    """
+    Returns a configured ChatModel based on provider and task.
+    Optimized: Uses 'Instant' models for fast tasks to avoid rate limits.
+    """
     if provider == "groq":
-        from langchain_groq import ChatGroq
+        # MODEL TIERING: Use 70B for Summary, 8B-Instant for Actions/Decisions
+        model_name = "llama-3.3-70b-versatile" if task_type == "summary" else "llama-3.1-8b-instant"
+        
         return ChatGroq(
-            model="qwen/qwen3-32b",
+            model=model_name,
             api_key=os.environ.get("GROQ_API_KEY"),
-            temperature=0.6,
+            temperature=0.6 if task_type == "summary" else 0.1,
+            streaming=True,
         )
     elif provider == "huggingface":
-        from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+        if not HF_AVAILABLE:
+            raise ImportError("langchain-huggingface not installed. Please restart server.")
+            
         llm = HuggingFaceEndpoint(
-            repo_id="Qwen/Qwen3-8B",
+            repo_id="Qwen/Qwen2.5-7B-Instruct",
             huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
             task="text-generation",
             max_new_tokens=2048,
+            streaming=True,
         )
         return ChatHuggingFace(llm=llm)
     else:
@@ -85,9 +103,12 @@ def _get_chat_llm(provider: str):
             model="llama-3.3-70b-versatile",
             api_key=os.environ.get("GROQ_API_KEY"),
             temperature=0.7,
+            streaming=True,
         )
+
     elif provider == "huggingface":
-        from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+        if not HF_AVAILABLE:
+            raise ImportError("langchain-huggingface not installed.")
         llm = HuggingFaceEndpoint(
             repo_id="mistralai/Mistral-7B-Instruct-v0.2",
             huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
@@ -117,18 +138,11 @@ def _clean_llm_output(text: str) -> str:
     return text.strip()
 
 
-# ─── Core Inference Functions ──────────────────────────────────────────────
+# --- Core Inference Functions ----------------------------------------------
 
 def invoke_generation(chain_builder, invoke_args: dict) -> str:
     """
     Execute a generation LLM call with automatic failover.
-    
-    Args:
-        chain_builder: function(llm) -> chain  (builds prompt|llm|parser)
-        invoke_args: dict of args to pass to chain.invoke()
-    
-    Returns:
-        LLM output string or parsed result
     """
     last_error = None
     tried_providers = set()
@@ -145,16 +159,15 @@ def invoke_generation(chain_builder, invoke_args: dict) -> str:
                 break
         
         tried_providers.add(provider)
-        logging.info(f"==================================================")
-        logging.info(f"🧠 GENERATION ROUTING -> USING PROVIDER: [{provider.upper()}]")
-        logging.info(f"==================================================")
+        logging.info("--------------------------------------------------")
+        logging.info(f"GENERATION ROUTING -> USING PROVIDER: [{provider.upper()}]")
+        logging.info("--------------------------------------------------")
 
         try:
             start = time.monotonic()
-            llm = _get_generation_llm(provider)
+            llm = get_generation_model(provider)
             chain = chain_builder(llm)
             
-            # For Ollama, we use the standard invocation
             if provider == "ollama":
                 _local_llm_manager.acquire()
                 try:
@@ -162,29 +175,13 @@ def invoke_generation(chain_builder, invoke_args: dict) -> str:
                 finally:
                     _local_llm_manager.release()
             else:
-                # For Cloud (Groq/HF), we add a safety layer to handle <think> tags and noise
                 try:
                     result = chain.invoke(invoke_args)
                 except Exception as e:
-                    # If it's a parsing error, we try to recover the raw text and clean it
                     error_str = str(e)
                     if "invalid json" in error_str.lower() or "parsing" in error_str.lower():
-                        logging.warning(f"⚠️ [{provider}] parsing failed, attempting recovery...")
+                        logging.warning(f"[WARN] [{provider}] parsing failed, attempting recovery...")
                         
-                        # We need to get the raw text. We'll re-run with a string parser.
-                        # This is the safest way to ensure we get exactly what the LLM sent.
-                        from langchain_core.output_parsers import StrOutputParser
-                        # We reconstruct the chain part by part if possible, 
-                        # but since we have a lambda, we'll just try to reach into the exception
-                        # if it contains the output, or re-run.
-                        
-                        # Re-running is slightly slower but 100% reliable for recovery.
-                        # We use the same prompt and LLM but a string parser.
-                        # Note: We need a way to get the prompt from the chain_builder.
-                        # Since we can't easily, we'll look for 'output' in the exception.
-                        
-                        # Most LangChain parsers include the output in the error message
-                        # or as an attribute.
                         output = None
                         if hasattr(e, 'llm_output'):
                             output = e.llm_output
@@ -193,13 +190,10 @@ def invoke_generation(chain_builder, invoke_args: dict) -> str:
                         
                         if output:
                             cleaned_output = _clean_llm_output(output)
-                            # Now we need the parser to turn it into an object
-                            # We can extract the parser from the chain!
-                            # Chain is usually Prompt | LLM | Parser
                             if hasattr(chain, 'last'):
                                 parser = chain.last
                                 result = parser.parse(cleaned_output)
-                                logging.info(f"✅ Recovered from [{provider}] parsing error after cleaning.")
+                                logging.info(f"[INFO] Recovered from [{provider}] parsing error.")
                             else:
                                 raise e
                         else:
@@ -208,29 +202,151 @@ def invoke_generation(chain_builder, invoke_args: dict) -> str:
                         raise e
 
             latency_ms = (time.monotonic() - start) * 1000
-            
             generation_provider_manager.record_success(provider, latency_ms)
-            logging.info(f"✅ Generation completed via [{provider}] in {latency_ms:.0f}ms")
+            logging.info(f"[OK] Generation completed via [{provider}] in {latency_ms:.0f}ms")
             return result
 
         except Exception as e:
             error_msg = str(e).lower()
             if "rate" in error_msg and "limit" in error_msg or "429" in error_msg:
                 generation_provider_manager.mark_rate_limited(provider, 60.0)
-                logging.warning(f"⚠️ [{provider}] rate limited for generation, trying next...")
+                logging.warning(f"[WARN] [{provider}] rate limited, trying next...")
             else:
                 generation_provider_manager.record_failure(provider, type(e).__name__)
-                logging.error(f"❌ [{provider}] generation failed: {e}")
+                logging.error(f"[ERROR] [{provider}] generation failed: {e}")
             last_error = e
             continue
 
     raise Exception(f"All generation providers failed. Last error: {last_error}")
 
 
+def stream_generation(chain_builder, invoke_args: dict, task_type: str = "summary"):
+    """
+    Generator that handles multi-provider failover with REAL-TIME STREAMING.
+    """
+    providers = generation_provider_manager.get_active_providers()
+    
+    for provider in providers:
+        try:
+            print(f"[STREAM] ROUTING -> {provider.upper()} ({task_type})")
+            
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    llm = get_generation_model(provider, task_type=task_type)
+                    chain = chain_builder(llm)
+                    
+                    full_content = []
+                    start = time.monotonic()
+                    first_token = True
+                    is_thinking = False
+                    
+                    if provider == "ollama":
+                        _local_llm_manager.acquire()
+                        try:
+                            for chunk in chain.stream(invoke_args):
+                                if first_token:
+                                    latency_ms = (time.monotonic() - start) * 1000
+                                    generation_provider_manager.record_success(provider, latency_ms)
+                                    first_token = False
+                                
+                                text = chunk if isinstance(chunk, str) else getattr(chunk, 'content', str(chunk))
+                                if "<think>" in text: is_thinking = True
+                                yield (is_thinking, text.replace("<think>", "").replace("</think>", ""))
+                                full_content.append(text)
+                                if "</think>" in text: is_thinking = False
+                        finally:
+                            _local_llm_manager.release()
+                    else:
+                        for chunk in chain.stream(invoke_args):
+                            if first_token:
+                                latency_ms = (time.monotonic() - start) * 1000
+                                generation_provider_manager.record_success(provider, latency_ms)
+                                first_token = False
+                            
+                            text = chunk if isinstance(chunk, str) else getattr(chunk, 'content', str(chunk))
+                            if "<think" in text: is_thinking = True
+                            clean_text = text.replace("<think>", "").replace("</think>", "")
+                            if clean_text:
+                                yield (is_thinking, clean_text)
+                                full_content.append(clean_text)
+                            if "</think>" in text: is_thinking = False
+                    return
+                except Exception as e:
+                    if ("rate" in str(e).lower() or "429" in str(e)) and attempt < max_retries - 1:
+                        print(f"  [WARN] Groq Rate Limit. Retrying in 2s...")
+                        time.sleep(2)
+                        continue
+                    raise e
+        except Exception as e:
+            logging.error(f"[ERROR] [{provider}] stream failed: {e}")
+            continue
+
+    raise Exception("All generation stream providers failed.")
+
+
+async def astream_generation(chain_builder, invoke_args: dict, task_type: str = "summary"):
+    """
+    Async generator for real-time streaming with intelligent task-routing.
+    """
+    providers = generation_provider_manager.get_active_providers()
+    
+    for provider in providers:
+        try:
+            print(f"[ASYNC STREAM] ROUTING -> {provider.upper()} ({task_type})")
+            
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    llm = get_generation_model(provider, task_type=task_type)
+                    chain = chain_builder(llm)
+                    
+                    start = time.monotonic()
+                    first_token = True
+                    is_thinking = False
+                    
+                    if provider == "ollama":
+                        async with asyncio.Lock(): 
+                            async for chunk in chain.astream(invoke_args):
+                                if first_token:
+                                    latency_ms = (time.monotonic() - start) * 1000
+                                    generation_provider_manager.record_success(provider, latency_ms)
+                                    first_token = False
+                                
+                                text = chunk if isinstance(chunk, str) else getattr(chunk, 'content', str(chunk))
+                                if "<think>" in text: is_thinking = True
+                                yield (is_thinking, text.replace("<think>", "").replace("</think>", ""))
+                                if "</think>" in text: is_thinking = False
+                    else:
+                        async for chunk in chain.astream(invoke_args):
+                            if first_token:
+                                latency_ms = (time.monotonic() - start) * 1000
+                                generation_provider_manager.record_success(provider, latency_ms)
+                                first_token = False
+                            
+                            text = chunk if isinstance(chunk, str) else getattr(chunk, 'content', str(chunk))
+                            if "<think" in text: is_thinking = True
+                            clean_text = text.replace("<think>", "").replace("</think>", "")
+                            if clean_text:
+                                yield (is_thinking, clean_text)
+                            if "</think>" in text: is_thinking = False
+                    return
+                except Exception as e:
+                    if ("rate" in str(e).lower() or "429" in str(e)) and attempt < max_retries - 1:
+                        print(f"  [WARN] Groq Rate Limit. Retrying in 2s...")
+                        await asyncio.sleep(2)
+                        continue
+                    raise e
+        except Exception as e:
+            logging.error(f"[ERROR] [{provider}] async stream failed: {e}")
+            continue
+
+    raise Exception("All async generation stream providers failed.")
+
+
 def invoke_chat(chain_builder, invoke_args: dict):
     """
     Execute a chat LLM call with automatic failover.
-    Same pattern as invoke_generation but uses chat provider pool.
     """
     last_error = None
     tried_providers = set()
@@ -247,9 +363,9 @@ def invoke_chat(chain_builder, invoke_args: dict):
                 break
         
         tried_providers.add(provider)
-        logging.info(f"==================================================")
-        logging.info(f"💬 CHAT ROUTING -> USING PROVIDER: [{provider.upper()}]")
-        logging.info(f"==================================================")
+        logging.info("--------------------------------------------------")
+        logging.info(f"CHAT ROUTING -> USING PROVIDER: [{provider.upper()}]")
+        logging.info("--------------------------------------------------")
 
         try:
             start = time.monotonic()
@@ -266,9 +382,8 @@ def invoke_chat(chain_builder, invoke_args: dict):
                 result = chain.invoke(invoke_args)
                 
             latency_ms = (time.monotonic() - start) * 1000
-            
             chat_provider_manager.record_success(provider, latency_ms)
-            logging.info(f"✅ Chat completed via [{provider}] in {latency_ms:.0f}ms")
+            logging.info(f"[OK] Chat completed via [{provider}] in {latency_ms:.0f}ms")
             return result
 
         except Exception as e:
@@ -286,8 +401,6 @@ def invoke_chat(chain_builder, invoke_args: dict):
 def stream_chat(chain_builder, invoke_args: dict):
     """
     Stream a chat LLM response with automatic failover.
-    Returns a generator that yields token chunks.
-    Falls back to next provider if streaming fails before first token.
     """
     last_error = None
     tried_providers = set()
@@ -304,9 +417,9 @@ def stream_chat(chain_builder, invoke_args: dict):
                 break
         
         tried_providers.add(provider)
-        logging.info(f"==================================================")
-        logging.info(f"💬 CHAT STREAM ROUTING -> USING PROVIDER: [{provider.upper()}]")
-        logging.info(f"==================================================")
+        logging.info("--------------------------------------------------")
+        logging.info(f"CHAT STREAM ROUTING -> USING PROVIDER: [{provider.upper()}]")
+        logging.info("--------------------------------------------------")
 
         try:
             start = time.monotonic()
@@ -322,7 +435,7 @@ def stream_chat(chain_builder, invoke_args: dict):
                         if first_token:
                             latency_ms = (time.monotonic() - start) * 1000
                             chat_provider_manager.record_success(provider, latency_ms)
-                            logging.info(f"⚡ First token via [{provider}] in {latency_ms:.0f}ms")
+                            logging.info(f"[SPEED] First token via [{provider}] in {latency_ms:.0f}ms")
                             first_token = False
                         yield chunk
                 finally:
@@ -332,7 +445,7 @@ def stream_chat(chain_builder, invoke_args: dict):
                     if first_token:
                         latency_ms = (time.monotonic() - start) * 1000
                         chat_provider_manager.record_success(provider, latency_ms)
-                        logging.info(f"⚡ First token via [{provider}] in {latency_ms:.0f}ms")
+                        logging.info(f"[SPEED] First token via [{provider}] in {latency_ms:.0f}ms")
                         first_token = False
                     yield chunk
                     

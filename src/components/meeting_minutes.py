@@ -10,39 +10,100 @@ from src.meeting_state import MeetingMinutes as MeetingMinutes
 class MeetingProcessor:
     def streamMeetingMinutes(self, target_dept, cleaned_audio):
         """
-        Generator that executes the meeting pipeline sequentially 
-        and yields SSE events after each stage completes.
+        Generator that executes the meeting pipeline with PARALLEL real-time streaming.
+        Restores the original parallel workflow while maintaining ChatGPT-style updates.
         """
         import json
+        import queue
+        from concurrent.futures import ThreadPoolExecutor
+        from src.utils import stream_summary, stream_action_items, stream_key_decisions
 
         if cleaned_audio is None:
             raise HTTPException(status_code=404, detail="Please upload any meeting")
         
         state = {"cleaned_audio": cleaned_audio}
 
-        # Stage 1: Audio Transcription
+        # Stage 1: Audio Transcription (Must be first)
         yield f"data: {json.dumps({'stage': 'transcription', 'status': 'in_progress'})}\n\n"
         result = convert_audio(state)
         state.update(result)
         yield f"data: {json.dumps({'stage': 'transcription', 'status': 'done'})}\n\n"
 
-        # Stage 2: Summary Generation
-        yield f"data: {json.dumps({'stage': 'summary', 'status': 'in_progress'})}\n\n"
-        result = generate_summary(state)
-        state.update(result)
-        yield f"data: {json.dumps({'stage': 'summary', 'status': 'done'})}\n\n"
+        # Prepare for Parallel Streaming
+        token_queue = queue.Queue()
+        stages = ['summary', 'action_items', 'key_decisions']
+        for stage in stages:
+            yield f"data: {json.dumps({'stage': stage, 'status': 'in_progress'})}\n\n"
 
-        # Stage 3: Action Items Extraction
-        yield f"data: {json.dumps({'stage': 'action_items', 'status': 'in_progress'})}\n\n"
-        result = generate_action_items(state)
-        state.update(result)
-        yield f"data: {json.dumps({'stage': 'action_items', 'status': 'done'})}\n\n"
+        def capture_stream(generator_func, stage_name):
+            full_text = []
+            try:
+                for is_thought, token in generator_func(state):
+                    event_type = 'thought' if is_thought else 'chunk'
+                    token_queue.put({'stage': stage_name, 'type': event_type, 'token': token})
+                    if not is_thought:
+                        full_text.append(token)
+                token_queue.put({'stage': stage_name, 'status': 'done', 'final_text': "".join(full_text)})
+            except Exception as e:
+                import traceback
+                logging.error(f"Error in {stage_name} stream: {e}\n{traceback.format_exc()}")
+                token_queue.put({'stage': stage_name, 'status': 'error', 'error': str(e)})
 
-        # Stage 4: Key Decisions Identification
-        yield f"data: {json.dumps({'stage': 'key_decisions', 'status': 'in_progress'})}\n\n"
-        result = generate_key_decisions(state)
-        state.update(result)
-        yield f"data: {json.dumps({'stage': 'key_decisions', 'status': 'done'})}\n\n"
+        # Launch all 3 generations in parallel with a small stagger to avoid rate limits
+        import time
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            executor.submit(capture_stream, stream_summary, 'summary')
+            time.sleep(0.2) # Stagger
+            executor.submit(capture_stream, stream_action_items, 'action_items')
+            time.sleep(0.2) # Stagger
+            executor.submit(capture_stream, stream_key_decisions, 'key_decisions')
+
+
+            completed_stages = 0
+            while completed_stages < 3:
+                try:
+                    item = token_queue.get(timeout=60) # Timeout after 60s of inactivity
+                    if item.get('status') in ['done', 'error']:
+                        completed_stages += 1
+                        # Save result to state for final formatting
+                        if item.get('status') == 'done':
+                            stage = item['stage']
+                            raw_text = item['final_text']
+                            if stage == 'summary':
+                                state['summary'] = raw_text
+                            else:
+                                try:
+                                    # Robust JSON extraction for Actions/Decisions
+                                    import re
+                                    clean_json = raw_text.strip()
+                                    
+                                    # 1. Try splitting by code blocks first
+                                    if "```json" in clean_json:
+                                        clean_json = clean_json.split("```json")[1].split("```")[0]
+                                    elif "```" in clean_json:
+                                        clean_json = clean_json.split("```")[1].split("```")[0]
+                                    
+                                    # 2. If still not valid JSON, look for the first [ and last ]
+                                    try:
+                                        state[stage] = json.loads(clean_json.strip())
+                                    except json.JSONDecodeError:
+                                        match = re.search(r'\[.*\]', clean_json, re.DOTALL)
+                                        if match:
+                                            state[stage] = json.loads(match.group())
+                                        else:
+                                            state[stage] = []
+                                except Exception as e:
+                                    logging.error(f"Failed to parse {stage} JSON: {e}")
+                                    state[stage] = []
+
+                        
+                        # Forward the status event
+                        yield f"data: {json.dumps(item)}\n\n"
+                    else:
+                        # Forward chunk event
+                        yield f"data: {json.dumps(item)}\n\n"
+                except queue.Empty:
+                    break
 
         # Stage 5: Format Final Report
         yield f"data: {json.dumps({'stage': 'formatting', 'status': 'in_progress'})}\n\n"
@@ -51,6 +112,8 @@ class MeetingProcessor:
         
         final_report = state.get('final_report', '')
         yield f"data: {json.dumps({'stage': 'complete', 'final_report': final_report})}\n\n"
+
+
 
     def generateMeetingMinutes(self, target_dept, cleaned_audio):
         try:

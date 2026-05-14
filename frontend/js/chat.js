@@ -506,6 +506,46 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
         `;
     }
+    
+    // 6c. Render an empty report shell for streaming
+    function renderStreamingShell(container) {
+        container.style.display = 'block';
+        container.innerHTML = `
+            <div class="report-container">
+                <div class="report-section" id="section-summary">
+                    <div class="report-section-header">
+                        <div class="report-section-icon summary">📝</div>
+                        <div class="report-section-title">Summary</div>
+                    </div>
+                    <div class="report-section-body">
+                        <div class="report-summary-text streaming-content"></div>
+                    </div>
+                </div>
+
+                <div class="report-section" id="section-action_items">
+                    <div class="report-section-header">
+                        <div class="report-section-icon actions">✅</div>
+                        <div class="report-section-title">Action Items</div>
+                    </div>
+                    <div class="report-section-body">
+                        <div class="action-items-stream streaming-content" style="font-family: monospace; white-space: pre-wrap; font-size: 0.85rem; opacity: 0.8;"></div>
+                    </div>
+                </div>
+
+                <div class="report-section" id="section-key_decisions">
+                    <div class="report-section-header">
+                        <div class="report-section-icon decisions">🔑</div>
+                        <div class="report-section-title">Key Decisions</div>
+                    </div>
+                    <div class="report-section-body">
+                        <div class="decisions-stream streaming-content" style="font-family: monospace; white-space: pre-wrap; font-size: 0.85rem; opacity: 0.8;"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        return container.querySelector('.report-container');
+    }
+
 
     // 11. Mobile Responsiveness Handlers
     const mobileMenuBtn = document.getElementById('mobile-menu-btn');
@@ -781,8 +821,58 @@ document.addEventListener('DOMContentLoaded', async () => {
                     try {
                         const parsed = JSON.parse(dataStr);
                         
-                        // We only care about the final saved stage
-                        if (parsed.stage === 'saved') {
+                        // --- New Streaming Logic ---
+                        if (parsed.stage && (parsed.type === 'chunk' || parsed.type === 'thought')) {
+                            const reportDiv = containerElement.closest('.message-box').querySelector('.message-content');
+                            
+                            // Initialize shell if not present
+                            if (!reportDiv.querySelector('.report-container')) {
+                                renderStreamingShell(reportDiv);
+                                containerElement.removeAttribute('open');
+                                titleElement.innerText = "Synthesizing...";
+                            }
+
+                            // Find the correct streaming box
+                            let streamBox;
+                            if (parsed.stage === 'summary') streamBox = reportDiv.querySelector('.report-summary-text');
+                            if (parsed.stage === 'action_items') streamBox = reportDiv.querySelector('.action-items-stream');
+                            if (parsed.stage === 'key_decisions') streamBox = reportDiv.querySelector('.decisions-stream');
+
+                            if (streamBox) {
+                                if (parsed.type === 'thought') {
+                                    // Handle Thought Streaming
+                                    let thoughtEl = streamBox.parentNode.querySelector('.reasoning-status');
+                                    if (!thoughtEl) {
+                                        thoughtEl = document.createElement('div');
+                                        thoughtEl.className = 'reasoning-status';
+                                        thoughtEl.style.fontSize = '0.75rem';
+                                        thoughtEl.style.color = '#8b5cf6';
+                                        thoughtEl.style.fontStyle = 'italic';
+                                        thoughtEl.style.marginBottom = '4px';
+                                        thoughtEl.innerText = "🧠 Analyzing context...";
+                                        streamBox.parentNode.insertBefore(thoughtEl, streamBox);
+                                    }
+                                    // Pulsing effect
+                                    thoughtEl.style.opacity = (Math.sin(Date.now() / 200) + 2) / 3;
+                                } else {
+                                    // Handle Content Streaming
+                                    const thoughtEl = streamBox.parentNode.querySelector('.reasoning-status');
+                                    if (thoughtEl) thoughtEl.style.display = 'none';
+
+                                    streamBox.innerText += parsed.token;
+                                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                                }
+
+                            }
+                        }
+
+
+                        if (parsed.stage === 'formatting' && parsed.status === 'in_progress') {
+                            titleElement.innerText = "Finalizing Report...";
+                        }
+
+                        // We care about the final saved stage to finalize the UI
+                        if (parsed.stage === 'complete') {
                             clearInterval(activeTimerInterval);
                             
                             const reportDiv = containerElement.closest('.message-box').querySelector('.message-content');
@@ -802,6 +892,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             loadAllMeetings();
                             chatMessages.scrollTop = chatMessages.scrollHeight;
                         }
+
                     } catch (e) {
                         // Ignore malformed SSE lines
                     }

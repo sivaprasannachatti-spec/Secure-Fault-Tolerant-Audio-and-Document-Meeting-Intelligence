@@ -63,62 +63,199 @@ def convert_audio(state):
     
 def generate_summary(state):
     try:
-        print("In summary")
         from src.providers.llm_service import invoke_generation
         summary_prompt = getPrompts()[0]
         converted_text = state.get('converted_audio', '')
         if not converted_text:
-            return {"key_decisions": "No audio content to analyze"}
-        logging.info("Prompts received successfully")
+            return {"summary": "No audio content to analyze"}
         
         result = invoke_generation(
             chain_builder=lambda llm: summary_prompt | llm | StrOutputParser(),
             invoke_args={"converted_audio": converted_text}
         )
-        print(f"Summary: {result}")
         return {"summary": result}
     except Exception as e:
         raise CustomException(e, sys)
+
+def stream_summary(state):
+    """Generator for streaming summary tokens."""
+    try:
+        from src.providers.llm_service import stream_generation
+        summary_prompt = getPrompts()[0]
+        converted_text = state.get('converted_audio', '')
+        if not converted_text:
+            yield False, "No audio content to analyze"
+            return
+
+        for is_thought, token in stream_generation(
+            chain_builder=lambda llm: summary_prompt | llm | StrOutputParser(),
+            invoke_args={"converted_audio": converted_text}
+        ):
+            yield is_thought, token
+
+    except Exception as e:
+        logging.error(f"Error in stream_summary: {e}")
+        yield f"ERROR: {str(e)}"
+
     
 def generate_action_items(state):
     try:
-        print("In action items")
         from src.providers.llm_service import invoke_generation
         action_items_prompt = getPrompts()[1]
         action_items_parser = generate_structured_outputs()[0]
         converted_text = state.get('converted_audio', '')
         if not converted_text:
-            return {"key_decisions": "No audio content to analyze"}
+            return {"action_items": []}
         
         result = invoke_generation(
             chain_builder=lambda llm: action_items_prompt | llm | action_items_parser,
             invoke_args={"converted_audio": converted_text}
         )
         action_items = [item.dict() for item in result.items]
-        print(f"Action items: {action_items}")
         return {"action_items": action_items}
     except Exception as e:
         raise CustomException(e, sys)
+
+def stream_action_items(state):
+    """Generator for streaming action items tokens (raw JSON)."""
+    try:
+        from src.providers.llm_service import stream_generation
+        action_items_prompt = getPrompts()[1]
+        converted_text = state.get('converted_audio', '')
+        if not converted_text:
+            yield False, "[]"
+            return
+
+
+        for is_thought, token in stream_generation(
+            chain_builder=lambda llm: action_items_prompt | llm | StrOutputParser(),
+            invoke_args={"converted_audio": converted_text},
+            task_type="action_items"
+        ):
+
+            yield is_thought, token
+
+    except Exception as e:
+        logging.error(f"Error in stream_action_items: {e}")
+        yield False, f"ERROR: {str(e)}"
+
+
     
 def generate_key_decisions(state):
     try:
-        print("In key decisions")
         from src.providers.llm_service import invoke_generation
         key_decisions_prompt = getPrompts()[2]
         key_decisions_parser = generate_structured_outputs()[1]
         converted_text = state.get('converted_audio', '')
         if not converted_text:
-            return {"key_decisions": "No audio content to analyze"}
+            return {"key_decisions": []}
         
         result = invoke_generation(
             chain_builder=lambda llm: key_decisions_prompt | llm | key_decisions_parser,
             invoke_args={"converted_audio": converted_text}
         )
         key_decisions = [item.dict() for item in result.items]
-        print(f"Key decisions: {key_decisions}")
         return {"key_decisions": key_decisions}
     except Exception as e:
         raise CustomException(e, sys)
+
+def stream_key_decisions(state):
+    """Generator for streaming key decisions tokens (raw JSON)."""
+    try:
+        from src.providers.llm_service import stream_generation
+        key_decisions_prompt = getPrompts()[2]
+        converted_text = state.get('converted_audio', '')
+        if not converted_text:
+            yield False, "[]"
+            return
+
+
+        for is_thought, token in stream_generation(
+            chain_builder=lambda llm: key_decisions_prompt | llm | StrOutputParser(),
+            invoke_args={"converted_audio": converted_text},
+            task_type="key_decisions"
+        ):
+
+            yield is_thought, token
+
+    except Exception as e:
+        logging.error(f"Error in stream_key_decisions: {e}")
+        yield False, f"ERROR: {str(e)}"
+
+
+async def astream_summary(state):
+    """Async generator for streaming summary tokens."""
+    try:
+        from src.providers.llm_service import astream_generation
+        summary_prompt = getPrompts()[0]
+        converted_text = state.get('converted_audio', '')
+        if not converted_text:
+            yield False, "No audio content to analyze"
+            return
+
+
+        async for is_thought, token in astream_generation(
+            chain_builder=lambda llm: summary_prompt | llm | StrOutputParser(),
+            invoke_args={"converted_audio": converted_text},
+            task_type="summary"
+        ):
+
+            yield is_thought, token
+
+    except Exception as e:
+        logging.error(f"Error in astream_summary: {e}")
+        yield False, f"ERROR: {str(e)}"
+
+
+async def astream_action_items(state):
+    """Async generator for streaming action items tokens."""
+    try:
+        from src.providers.llm_service import astream_generation
+        action_items_prompt = getPrompts()[1]
+        converted_text = state.get('converted_audio', '')
+        if not converted_text:
+            yield False, "[]"
+            return
+
+
+        async for is_thought, token in astream_generation(
+            chain_builder=lambda llm: action_items_prompt | llm | StrOutputParser(),
+            invoke_args={"converted_audio": converted_text},
+            task_type="action_items"
+        ):
+
+            yield is_thought, token
+
+    except Exception as e:
+        logging.error(f"Error in astream_action_items: {e}")
+        yield False, f"ERROR: {str(e)}"
+
+
+async def astream_key_decisions(state):
+    """Async generator for streaming key decisions tokens."""
+    try:
+        from src.providers.llm_service import astream_generation
+        key_decisions_prompt = getPrompts()[2]
+        converted_text = state.get('converted_audio', '')
+        if not converted_text:
+            yield False, "[]"
+            return
+
+
+        async for is_thought, token in astream_generation(
+            chain_builder=lambda llm: key_decisions_prompt | llm | StrOutputParser(),
+            invoke_args={"converted_audio": converted_text},
+            task_type="key_decisions"
+        ):
+
+            yield is_thought, token
+
+    except Exception as e:
+        logging.error(f"Error in astream_key_decisions: {e}")
+        yield False, f"ERROR: {str(e)}"
+
+
+
 
 def evaluate_summary(state):
     try:

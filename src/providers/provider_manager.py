@@ -162,6 +162,12 @@ class ProviderManager:
             if provider_name in self.providers:
                 self.providers[provider_name].mark_rate_limited(reset_after)
 
+    def get_active_providers(self) -> list:
+        """Returns a list of provider names that are currently available, in priority order."""
+        with self._lock:
+            return [name for name in self.priority_order if self.providers[name].is_available()]
+
+
     def get_status_report(self) -> dict:
         """Get a snapshot of all provider statuses for monitoring."""
         with self._lock:

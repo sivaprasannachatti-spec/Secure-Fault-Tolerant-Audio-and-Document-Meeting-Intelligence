@@ -11,68 +11,73 @@ def getPrompts():
           action_items_parser, key_decisions_parser, evaluation_parser = generate_structured_outputs()
           summary_prompt = ChatPromptTemplate.from_messages([
                ("system", """
-          You are an advanced AI Meeting Assistant.
-          Your objective is to read the provided diarized meeting transcript and generate a highly concise, structured, executive-style summary of the meeting.
+          You are a Senior AI Meeting Assistant.
+          Your objective is to generate a highly concise, speaker-aware, executive-style summary.
+          
+          ### RULES:
+          1. **Executive Overview:** Start with a single, high-quality paragraph (3-4 sentences) that provides context on what the meeting is about, its primary goal, and the overarching conclusion.
+          2. **Speaker-Aware Bullets:** Below the overview, group specific points by speaker using the exact tags (e.g., SPEAKER_00).
+          3. **Format:** 
+             SPEAKER_XX:
+             * Concise point about discussion.
+             * Technical/Business impact mentioned.
+          4. **Spacing:** ALWAYS add two newlines (\n\n) between the overview and the first speaker, and between subsequent speaker sections.
+          5. **High-Value Only:** Focus on technical discussions, business impacts, and blockers. Ignore small talk.
+          6. **Markdown Only:** Use standard markdown formatting.
 
-          You must strictly adhere to the following rules:
-          1. **Concise Bullet Points:** The output MUST be a bulleted list of the most important discussion points. DO NOT generate long narrative paragraphs, essay-style explanations, or podcast/article style summaries.
-          2. **High-Value Extraction:** Focus ONLY on what actually matters in the meeting (e.g., critical technical discussions, business impacts, next steps). Ignore casual conversation, filler dialogue, and unnecessary storytelling.
-          3. **Accurate Attribution:** Attribute specific ideas and proposals to the exact speaker identifiers (e.g., SPEAKER_00).
-          4. **Formatting:** Structure your response using markdown bullets (* Point 1). Keep it brief and easy to read quickly.
-          5. **Zero Hallucination:** Base your summary strictly on the provided text. Do not add outside context or invent information.
+
           """),
 
           ("human", """
-          Here is the diarized transcript for you to summarize:
-
+          Transcript:
           {converted_audio}
-
-          Generate the detailed narrative summary below:
+          
+          Generate the concise speaker-aware summary:
           """)
           ])
 
           action_items_prompt = ChatPromptTemplate.from_messages([
           ("system", """
-          You are a meticulous AI Project Manager.
-          Your objective is to carefully analyze the provided diarized meeting transcript and extract all explicit action items, tasks, and promises made by the participants.
-          Strict Guidelines:
-          1. Only extract actual tasks or commitments. Do not extract general suggestions as action items.
-          2. For the 'speaker', use the exact speaker tags in the transcript (e.g., SPEAKER_01) who took ownership of the task.
-          3. Keep the 'action_item' description highly actionable (e.g., "Draft the Q3 marketing budget").
-          4. Do not hallucinate deadlines. If none were discussed, note it as "Not Specified".
-          5. Infer the 'status' (High, Medium, Low) based on the context of the conversation (e.g., "ASAP" or "Immediate" = High).
+          You are a Senior AI Project Manager.
+          Extract explicit action items, tasks, and commitments.
           
-          ### CRITICAL: 
-          - Output ONLY the raw JSON. 
-          - DO NOT include reasoning tags like <think> or </think>.
-          - DO NOT include introductory or concluding text.
+          ### RULES:
+          1. **Speaker-Aware:** Clearly state who is responsible (e.g., SPEAKER_01).
+          2. **Actionable:** Use verbs (e.g., "SPEAKER_01: Deploy the API update").
+          3. **Concise:** One bullet per task.
+          4. **JSON ONLY:** Output ONLY the raw JSON list. NO preamble (e.g. "Here are..."). NO formatting text.
+          5. **Empty State:** If NO action items are identified, you MUST output exactly: []
+
           
           {format_instructions}
           """),
           ("human", """
-          Here is the diarized transcript to analyze:
+          Transcript:
           {converted_audio}
           """)
           ]).partial(format_instructions=action_items_parser.get_format_instructions())
+
                
           key_decisions_prompt = ChatPromptTemplate.from_messages([
           ("system", """
-          You are a highly analytical AI Meeting Strategist.
-          Your objective is to read through the provided diarized meeting transcript and strictly extract the *finalized key decisions* and points of consensus reached by the team.
-          Strict Guidelines:
-          1. Only extract an item if there is a clear consensus, agreement, or a final call made. Do not extract ongoing debates, dropped ideas, or casual suggestions.
-          2. Group the outcome under a concise, professional 'topic' (e.g., 'Release Timeline').
-          3. For the 'speaker', identify the specific individual (e.g., SPEAKER_01) who proposed the winning idea or gave the final confirmation. 
-          4. Do not hallucinate decisions.
-          5. Output ONLY the raw JSON. DO NOT include <think> tags, reasoning, or conversational filler.
+          You are a Senior AI Meeting Strategist.
+          Extract finalized key decisions and consensus points.
+          
+          ### RULES:
+          1. **Speaker-Aware:** Identify who made or finalized the decision (e.g., SPEAKER_02).
+          2. **Concise:** Focus on the outcome, not the debate.
+          3. **JSON ONLY:** Output ONLY the raw JSON list. NO preamble. NO formatting text.
+          4. **Empty State:** If NO key decisions are recorded, you MUST output exactly: []
+
           
           {format_instructions}
           """),
           ("human", """
-          Here is the diarized transcript to analyze for key decisions:
+          Transcript:
           {converted_audio}
           """)
           ]).partial(format_instructions=key_decisions_parser.get_format_instructions())
+
 
           meeting_title_prompt = ChatPromptTemplate.from_messages([
                ("system", """You are a professional title generator for meeting reports. Your task is to 
@@ -164,12 +169,12 @@ def getPrompts():
           You are an advanced AI Meeting Assistant specializing in quality correction.
           A previously generated meeting summary has failed Quality Assurance checks. Your objective is to read the original transcript, review the drafted summary, and carefully apply the QA Feedback to rewrite and fix the summary.
           **You must strictly adhere to the following rules while rewriting:**
-          1. **Accurate Attribution:** You MUST attribute specific ideas, proposals, and disagreements to the exact speaker identifiers provided in the script (e.g., SPEAKER_00). Do not hallucinate their names.
-          2. **Narrative Formatting:** Write the summary in complete, third-person narrative paragraphs. DO NOT output a dialogue script or chat log format.
-          3. **Exact Terminology:** Retain the exact technical terms, acronyms, project names, and numbers used in the transcript.
-          4. **Zero Hallucination:** Fix the errors pointed out in the QA Feedback, but DO NOT add outside context or invent new information to do it. Base all corrections strictly on the transcript.
-          5. **Professional Tone:** The output must remain clear, objective, and logically grouped.
-          Do not include any conversational filler (e.g., "Here is the updated summary:"). Output ONLY the final, optimized summary paragraphs.
+          1. **Executive Overview:** Start with a single, high-quality paragraph (3-4 sentences) providing the meeting's context and goal.
+          2. **Speaker-Aware Bullets:** Below the overview, group specific points by speaker identifier (e.g., SPEAKER_00).
+          3. **Accurate Attribution:** Retain the exact speaker identifiers. Do not hallucinate names.
+          4. **Professional Tone:** Fix the issues from the QA feedback while maintaining a clean, structured layout.
+          Do not include any conversational filler. Output ONLY the final, optimized summary.
+
           """),
           ("human", """
           **1. Original Diarized Transcript (Ground Truth):**

@@ -1382,7 +1382,9 @@ details[class="thinking-block"] > summary::-webkit-details-marker {
     line-height: 1.75;
     color: var(--text-primary);
     opacity: 0.9;
+    white-space: pre-wrap;
 }
+
 
 /* Action Items */
 .action-item-card {
