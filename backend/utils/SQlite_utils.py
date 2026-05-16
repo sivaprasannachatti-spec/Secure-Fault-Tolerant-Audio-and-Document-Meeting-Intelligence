@@ -16,7 +16,7 @@ def getMeetingData(meeting_id: int):
         cursor = conn.cursor()
 
         cursor.execute(
-            "select target_dept, team_id, is_department_wide, final_report from meetings where meeting_id = ?",(meeting_id,)
+            "select target_dept, team_id, is_department_wide, final_report, meeting_type from meetings where meeting_id = ?",(meeting_id,)
         )
         meeting_data = cursor.fetchone()
         conn.close()
@@ -260,15 +260,25 @@ def insertMeeting(target_dept_id: int, team_id: int, is_department_wide: bool, f
     except Exception as e:
         raise CustomException(e, sys)
 
-def getChatsByUserId(user_id: str):
+def getChatsByUserId(user_id: str, meeting_type: str = None):
+    """Retrieves chat history for a user, optionally filtered by meeting_type."""
     try:
         conn = sqlite3.connect(database=os.environ['DB_FILE'])
         conn.row_factory = sqlite3.Row  
         cursor = conn.cursor()
 
-        cursor.execute(
-            "select chat_title, chat_id from chats where user_id = ?",(user_id,)
-        )
+        query = """
+            SELECT c.chat_title, c.chat_id 
+            FROM chats c
+            JOIN meetings m ON c.meeting_id = m.meeting_id
+            WHERE c.user_id = ?
+        """
+        params = [user_id]
+        if meeting_type:
+            query += " AND m.meeting_type = ?"
+            params.append(meeting_type)
+            
+        cursor.execute(query, tuple(params))
         response = cursor.fetchall()
         conn.close()
         if response:
@@ -284,7 +294,7 @@ def getMeetingContent(meeting_id: int):
         cursor = conn.cursor()
 
         cursor.execute(
-            "select meeting_id, target_dept, team_id, is_department_wide, final_report, meeting_title from meetings where meeting_id = ?",(meeting_id,)
+            "select meeting_id, target_dept, team_id, is_department_wide, final_report, meeting_title, meeting_type from meetings where meeting_id = ?",(meeting_id,)
         )
         response = cursor.fetchone()
         conn.close()
@@ -294,17 +304,75 @@ def getMeetingContent(meeting_id: int):
     except Exception as e:
         raise CustomException(e, sys)
 
-def getMeetingsByDept(dept_id: int):
+def getMeetingsByDept(dept_id: int, meeting_type: str = None):
+    """Retrieves all meetings in a department, optionally filtered by meeting_type."""
     try:
         conn = sqlite3.connect(database=os.environ['DB_FILE'])
         conn.row_factory = sqlite3.Row  
         cursor = conn.cursor()
 
-        cursor.execute(
-            "select meeting_id, target_dept, meeting_title, final_report, team_id, is_department_wide from meetings where target_dept = ?",(dept_id,)
-        )
+        query = "SELECT * FROM meetings WHERE target_dept = ?"
+        params = [dept_id]
+        if meeting_type:
+            query += " AND meeting_type = ?"
+            params.append(meeting_type)
+
+        cursor.execute(query, tuple(params))
         response = cursor.fetchall()
         conn.close()
         return [dict(row) for row in response]
+    except Exception as e:
+        raise CustomException(e, sys)
+
+
+# ============================================================================
+# Document Tree Utilities (Vectorless RAG — NOT synced to Supabase)
+# ============================================================================
+
+def save_document_tree(meeting_id: int, tree_json: str, file_type: str, token_count: int):
+    """Persists a document tree JSON to the local SQLite database."""
+    try:
+        conn = sqlite3.connect(database=os.environ['DB_FILE'])
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO document_trees (meeting_id, tree_json, file_type, token_count) VALUES (?, ?, ?, ?)",
+            (meeting_id, tree_json, file_type, token_count)
+        )
+        conn.commit()
+        conn.close()
+        logging.info(f"📄 Document tree saved for meeting_id={meeting_id} (type={file_type}, tokens={token_count})")
+    except Exception as e:
+        raise CustomException(e, sys)
+
+def get_document_tree(meeting_id: int):
+    """Retrieves a document tree JSON from the local SQLite database."""
+    try:
+        conn = sqlite3.connect(database=os.environ['DB_FILE'])
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT tree_json, file_type, token_count FROM document_trees WHERE meeting_id = ?", (meeting_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return dict(row)
+        return None
+    except Exception as e:
+        raise CustomException(e, sys)
+
+def save_meeting_offline_document(target_dept, team_id, is_department_wide, final_report, meeting_title):
+    """Saves a document-type meeting to SQLite with meeting_type='document'."""
+    try:
+        conn = sqlite3.connect(database=os.environ['DB_FILE'])
+        meeting_id = -int(time.time() * 1000)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO meetings (meeting_id, target_dept, team_id, is_department_wide, final_report, meeting_title, meeting_type, synced) VALUES (?, ?, ?, ?, ?, ?, 'document', 0)",
+            (meeting_id, target_dept, team_id, is_department_wide, final_report, meeting_title)
+        )
+        conn.commit()
+        conn.close()
+        return meeting_id
     except Exception as e:
         raise CustomException(e, sys)

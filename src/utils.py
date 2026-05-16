@@ -1,3 +1,12 @@
+import platform
+# Python 3.14 Windows Hang Fix
+if not hasattr(platform, '_monkeypatched'):
+    platform.system = lambda: "Windows"
+    platform.release = lambda: "10"
+    platform.version = lambda: "10.0.19041"
+    platform.python_version = lambda: "3.14.3"
+    platform._monkeypatched = True
+
 import sys
 import os
 import traceback
@@ -98,66 +107,80 @@ def stream_summary(state):
         yield f"ERROR: {str(e)}"
 
     
+def extract_json_array(text: str) -> list:
+    """Greedy extraction of a JSON array from LLM output."""
+    import json
+    import re
+    try:
+        # Look for the first '[' and last ']'
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            clean_json = match.group(0)
+            return json.loads(clean_json)
+        return []
+    except Exception as e:
+        logging.error(f"Greedy JSON extraction failed: {e}")
+        return []
+
+def generate_meeting_title(state):
+    """Generates a title quickly using the early transcript."""
+    try:
+        from src.providers.llm_service import invoke_generation
+        title_prompt = getPrompts()[3]
+        transcript = state.get('converted_audio', '')
+        
+        # Use only first ~2000 words for speed
+        early_context = " ".join(transcript.split()[:2000])
+        
+        result = invoke_generation(
+            chain_builder=lambda llm: title_prompt | llm | StrOutputParser(),
+            invoke_args={"meeting_content": early_context}
+        )
+        # Clean title from any quotes or "Title:" prefix
+        clean_title = result.replace('Title:', '').replace('"', '').strip()
+        return {"title": clean_title}
+    except Exception as e:
+        logging.error(f"Title generation failed: {e}")
+        return {"title": "Team Sync Meeting"}
+
 def generate_action_items(state):
     try:
         from src.providers.llm_service import invoke_generation
         action_items_prompt = getPrompts()[1]
-        action_items_parser = generate_structured_outputs()[0]
         converted_text = state.get('converted_audio', '')
         if not converted_text:
             return {"action_items": []}
         
-        result = invoke_generation(
-            chain_builder=lambda llm: action_items_prompt | llm | action_items_parser,
+        # We use StrOutputParser first to get the raw text, then handle the JSON ourselves for robustness
+        raw_result = invoke_generation(
+            chain_builder=lambda llm: action_items_prompt | llm | StrOutputParser(),
             invoke_args={"converted_audio": converted_text}
         )
-        action_items = [item.dict() for item in result.items]
+        
+        action_items = extract_json_array(raw_result)
         return {"action_items": action_items}
     except Exception as e:
-        raise CustomException(e, sys)
+        logging.error(f"Action item extraction failed: {e}")
+        return {"action_items": []}
 
-def stream_action_items(state):
-    """Generator for streaming action items tokens (raw JSON)."""
-    try:
-        from src.providers.llm_service import stream_generation
-        action_items_prompt = getPrompts()[1]
-        converted_text = state.get('converted_audio', '')
-        if not converted_text:
-            yield False, "[]"
-            return
-
-
-        for is_thought, token in stream_generation(
-            chain_builder=lambda llm: action_items_prompt | llm | StrOutputParser(),
-            invoke_args={"converted_audio": converted_text},
-            task_type="action_items"
-        ):
-
-            yield is_thought, token
-
-    except Exception as e:
-        logging.error(f"Error in stream_action_items: {e}")
-        yield False, f"ERROR: {str(e)}"
-
-
-    
 def generate_key_decisions(state):
     try:
         from src.providers.llm_service import invoke_generation
         key_decisions_prompt = getPrompts()[2]
-        key_decisions_parser = generate_structured_outputs()[1]
         converted_text = state.get('converted_audio', '')
         if not converted_text:
             return {"key_decisions": []}
         
-        result = invoke_generation(
-            chain_builder=lambda llm: key_decisions_prompt | llm | key_decisions_parser,
+        raw_result = invoke_generation(
+            chain_builder=lambda llm: key_decisions_prompt | llm | StrOutputParser(),
             invoke_args={"converted_audio": converted_text}
         )
-        key_decisions = [item.dict() for item in result.items]
+        
+        key_decisions = extract_json_array(raw_result)
         return {"key_decisions": key_decisions}
     except Exception as e:
-        raise CustomException(e, sys)
+        logging.error(f"Key decision extraction failed: {e}")
+        return {"key_decisions": []}
 
 def stream_key_decisions(state):
     """Generator for streaming key decisions tokens (raw JSON)."""

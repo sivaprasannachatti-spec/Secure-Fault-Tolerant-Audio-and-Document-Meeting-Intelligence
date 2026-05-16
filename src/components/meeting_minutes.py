@@ -16,7 +16,6 @@ class MeetingProcessor:
         import json
         import queue
         from concurrent.futures import ThreadPoolExecutor
-        from src.utils import stream_summary, stream_action_items, stream_key_decisions
 
         if cleaned_audio is None:
             raise HTTPException(status_code=404, detail="Please upload any meeting")
@@ -31,76 +30,39 @@ class MeetingProcessor:
 
         # Prepare for Parallel Streaming
         token_queue = queue.Queue()
-        stages = ['summary', 'action_items', 'key_decisions']
+        # Add 'title' to the stages
+        stages = ['title', 'summary', 'action_items', 'key_decisions']
         for stage in stages:
             yield f"data: {json.dumps({'stage': stage, 'status': 'in_progress'})}\n\n"
 
-        def capture_stream(generator_func, stage_name):
-            full_text = []
+        def capture_result(generate_func, stage_name):
             try:
-                for is_thought, token in generator_func(state):
-                    event_type = 'thought' if is_thought else 'chunk'
-                    token_queue.put({'stage': stage_name, 'type': event_type, 'token': token})
-                    if not is_thought:
-                        full_text.append(token)
-                token_queue.put({'stage': stage_name, 'status': 'done', 'final_text': "".join(full_text)})
+                result_dict = generate_func(state)
+                # The result is a dict with the stage name as key
+                val = result_dict.get(stage_name, "")
+                state[stage_name] = val
+                token_queue.put({'stage': stage_name, 'status': 'done', 'final_text': val})
             except Exception as e:
                 import traceback
-                logging.error(f"Error in {stage_name} stream: {e}\n{traceback.format_exc()}")
+                logging.error(f"Error in {stage_name} generation: {e}\n{traceback.format_exc()}")
                 token_queue.put({'stage': stage_name, 'status': 'error', 'error': str(e)})
 
-        # Launch all 3 generations in parallel with a small stagger to avoid rate limits
+        # Launch all 4 generations in parallel (Added Title)
+        from src.utils import generate_meeting_title
         import time
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            executor.submit(capture_stream, stream_summary, 'summary')
-            time.sleep(0.2) # Stagger
-            executor.submit(capture_stream, stream_action_items, 'action_items')
-            time.sleep(0.2) # Stagger
-            executor.submit(capture_stream, stream_key_decisions, 'key_decisions')
-
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            executor.submit(capture_result, generate_meeting_title, 'title')
+            executor.submit(capture_result, generate_summary, 'summary')
+            executor.submit(capture_result, generate_action_items, 'action_items')
+            executor.submit(capture_result, generate_key_decisions, 'key_decisions')
 
             completed_stages = 0
-            while completed_stages < 3:
+            while completed_stages < 4:
                 try:
-                    item = token_queue.get(timeout=60) # Timeout after 60s of inactivity
+                    item = token_queue.get(timeout=120) 
                     if item.get('status') in ['done', 'error']:
                         completed_stages += 1
-                        # Save result to state for final formatting
-                        if item.get('status') == 'done':
-                            stage = item['stage']
-                            raw_text = item['final_text']
-                            if stage == 'summary':
-                                state['summary'] = raw_text
-                            else:
-                                try:
-                                    # Robust JSON extraction for Actions/Decisions
-                                    import re
-                                    clean_json = raw_text.strip()
-                                    
-                                    # 1. Try splitting by code blocks first
-                                    if "```json" in clean_json:
-                                        clean_json = clean_json.split("```json")[1].split("```")[0]
-                                    elif "```" in clean_json:
-                                        clean_json = clean_json.split("```")[1].split("```")[0]
-                                    
-                                    # 2. If still not valid JSON, look for the first [ and last ]
-                                    try:
-                                        state[stage] = json.loads(clean_json.strip())
-                                    except json.JSONDecodeError:
-                                        match = re.search(r'\[.*\]', clean_json, re.DOTALL)
-                                        if match:
-                                            state[stage] = json.loads(match.group())
-                                        else:
-                                            state[stage] = []
-                                except Exception as e:
-                                    logging.error(f"Failed to parse {stage} JSON: {e}")
-                                    state[stage] = []
-
-                        
-                        # Forward the status event
-                        yield f"data: {json.dumps(item)}\n\n"
-                    else:
-                        # Forward chunk event
+                        # Forward the final status event to frontend
                         yield f"data: {json.dumps(item)}\n\n"
                 except queue.Empty:
                     break

@@ -6,7 +6,7 @@ from typing import Annotated
 from src.exception import CustomException
 from src.logger import logging
 from backend.middlewares.auth_middleware import verifyJWT
-from backend.controllers.chat_controllers import handleNewChat, handleOldChat, handleGettingOldChat, handleGetAllChats, handleMeetingGeneration, handleGetAllMeetings, handleGetMeetingContent
+from backend.controllers.audio_chat_controllers import handleNewChat, handleOldChat, handleGettingOldChat, handleGetAllChats, handleMeetingGeneration, handleGetAllMeetings, handleGetMeetingContent
 
 chat_router = APIRouter()
 
@@ -26,8 +26,18 @@ def fileUpload(
     is_department_wide: bool = Form(False)
 ):
     try:
+        # Strict validation: Only audio files allowed in this workspace
         if not file.content_type.startswith("audio/"):
-            raise HTTPException(status_code=400, detail="Only audio files are allowed")
+            # Check if it's a document being uploaded in the wrong workspace
+            doc_exts = {'.pdf', '.docx', '.txt', '.md'}
+            import os
+            _, ext = os.path.splitext(file.filename)
+            if ext.lower() in doc_exts:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Documents cannot be uploaded in the Audio workspace. Please use the 'Meeting Notes' workspace."
+                )
+            raise HTTPException(status_code=400, detail="Only audio files (MP3, WAV, M4A) are allowed in this workspace.")
         audio_bytes = file.file.read()
         return handleMeetingGeneration(request=request, audio_bytes=audio_bytes, is_department_wide=is_department_wide)
     except Exception as e:

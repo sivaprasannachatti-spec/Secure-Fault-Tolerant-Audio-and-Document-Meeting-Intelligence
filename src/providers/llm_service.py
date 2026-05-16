@@ -74,10 +74,22 @@ def get_generation_model(provider: str, task_type: str = "summary"):
         
         return ChatGroq(
             model=model_name,
-            api_key=os.environ.get("GROQ_API_KEY"),
+            api_key=generation_provider_manager.get_active_key("groq"),
             temperature=0.6 if task_type == "summary" else 0.1,
             streaming=True,
         )
+    elif provider == "gemini":
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash-lite", # User-specified hackathon speed tier
+                google_api_key=generation_provider_manager.get_active_key("gemini"),
+                temperature=0.4 if task_type == "summary" else 0.1,
+                streaming=True,
+            )
+        except ImportError:
+            raise ImportError("langchain-google-genai not installed.")
+            
     elif provider == "huggingface":
         if not HF_AVAILABLE:
             raise ImportError("langchain-huggingface not installed. Please restart server.")
@@ -101,10 +113,22 @@ def _get_chat_llm(provider: str):
         from langchain_groq import ChatGroq
         return ChatGroq(
             model="llama-3.3-70b-versatile",
-            api_key=os.environ.get("GROQ_API_KEY"),
+            api_key=chat_provider_manager.get_active_key("groq"),
             temperature=0.7,
             streaming=True,
         )
+
+    elif provider == "gemini":
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash-lite",
+                google_api_key=chat_provider_manager.get_active_key("gemini"),
+                temperature=0.7,
+                streaming=True,
+            )
+        except ImportError:
+            raise ImportError("langchain-google-genai not installed.")
 
     elif provider == "huggingface":
         if not HF_AVAILABLE:
@@ -164,6 +188,7 @@ def invoke_generation(chain_builder, invoke_args: dict) -> str:
         logging.info("--------------------------------------------------")
 
         try:
+            api_key = generation_provider_manager.get_active_key(provider)
             start = time.monotonic()
             llm = get_generation_model(provider)
             chain = chain_builder(llm)
@@ -209,11 +234,11 @@ def invoke_generation(chain_builder, invoke_args: dict) -> str:
         except Exception as e:
             error_msg = str(e).lower()
             if "rate" in error_msg and "limit" in error_msg or "429" in error_msg:
-                generation_provider_manager.mark_rate_limited(provider, 60.0)
-                logging.warning(f"[WARN] [{provider}] rate limited, trying next...")
+                generation_provider_manager.mark_rate_limited(provider, key_if_any=api_key, reset_after=60.0)
+                logging.warning(f"[WARN] [{provider}] key hit rate limit, rotating to next key...")
             else:
                 generation_provider_manager.record_failure(provider, type(e).__name__)
-                logging.error(f"[ERROR] [{provider}] generation failed: {e}")
+                logging.error(f"[ERROR] [{provider}] key failed: {e}")
             last_error = e
             continue
 
@@ -230,8 +255,12 @@ def stream_generation(chain_builder, invoke_args: dict, task_type: str = "summar
         try:
             print(f"[STREAM] ROUTING -> {provider.upper()} ({task_type})")
             
-            max_retries = 2
+            # Try all available keys for this provider before moving to next
+            rotator = generation_provider_manager.providers[provider].key_rotator
+            max_retries = len(rotator.key_states) if rotator else 1
+            
             for attempt in range(max_retries):
+                api_key = generation_provider_manager.get_active_key(provider)
                 try:
                     llm = get_generation_model(provider, task_type=task_type)
                     chain = chain_builder(llm)
@@ -273,13 +302,15 @@ def stream_generation(chain_builder, invoke_args: dict, task_type: str = "summar
                             if "</think>" in text: is_thinking = False
                     return
                 except Exception as e:
-                    if ("rate" in str(e).lower() or "429" in str(e)) and attempt < max_retries - 1:
-                        print(f"  [WARN] Groq Rate Limit. Retrying in 2s...")
-                        time.sleep(2)
-                        continue
+                    if ("rate" in str(e).lower() or "429" in str(e)):
+                        generation_provider_manager.mark_rate_limited(provider, key_if_any=api_key, reset_after=60.0)
+                        if attempt < max_retries - 1:
+                            print(f"  [WARN] {provider.upper()} Rate Limit. Retrying with next key...")
+                            time.sleep(2)
+                            continue
                     raise e
         except Exception as e:
-            logging.error(f"[ERROR] [{provider}] stream failed: {e}")
+            logging.error(f"❌ [CRITICAL FAIL] [{provider}] completely failed after trying all keys: {e}")
             continue
 
     raise Exception("All generation stream providers failed.")
@@ -295,8 +326,11 @@ async def astream_generation(chain_builder, invoke_args: dict, task_type: str = 
         try:
             print(f"[ASYNC STREAM] ROUTING -> {provider.upper()} ({task_type})")
             
-            max_retries = 2
+            # Try all available keys for this provider before moving to next
+            rotator = generation_provider_manager.providers[provider].key_rotator
+            max_retries = len(rotator.key_states) if rotator else 1
             for attempt in range(max_retries):
+                api_key = generation_provider_manager.get_active_key(provider)
                 try:
                     llm = get_generation_model(provider, task_type=task_type)
                     chain = chain_builder(llm)
@@ -332,13 +366,15 @@ async def astream_generation(chain_builder, invoke_args: dict, task_type: str = 
                             if "</think>" in text: is_thinking = False
                     return
                 except Exception as e:
-                    if ("rate" in str(e).lower() or "429" in str(e)) and attempt < max_retries - 1:
-                        print(f"  [WARN] Groq Rate Limit. Retrying in 2s...")
-                        await asyncio.sleep(2)
-                        continue
+                    if ("rate" in str(e).lower() or "429" in str(e)):
+                        generation_provider_manager.mark_rate_limited(provider, key_if_any=api_key, reset_after=60.0)
+                        if attempt < max_retries - 1:
+                            print(f"  [WARN] {provider.upper()} Rate Limit. Retrying in 2s...")
+                            await asyncio.sleep(2)
+                            continue
                     raise e
         except Exception as e:
-            logging.error(f"[ERROR] [{provider}] async stream failed: {e}")
+            logging.error(f"❌ [CRITICAL FAIL] [{provider}] async stream completely failed: {e}")
             continue
 
     raise Exception("All async generation stream providers failed.")
@@ -368,6 +404,7 @@ def invoke_chat(chain_builder, invoke_args: dict):
         logging.info("--------------------------------------------------")
 
         try:
+            api_key = chat_provider_manager.get_active_key(provider)
             start = time.monotonic()
             llm = _get_chat_llm(provider)
             chain = chain_builder(llm)
@@ -389,7 +426,7 @@ def invoke_chat(chain_builder, invoke_args: dict):
         except Exception as e:
             error_msg = str(e).lower()
             if "rate" in error_msg and "limit" in error_msg or "429" in error_msg:
-                chat_provider_manager.mark_rate_limited(provider, 60.0)
+                chat_provider_manager.mark_rate_limited(provider, key_if_any=api_key, reset_after=60.0)
             else:
                 chat_provider_manager.record_failure(provider, type(e).__name__)
             last_error = e
@@ -422,6 +459,7 @@ def stream_chat(chain_builder, invoke_args: dict):
         logging.info("--------------------------------------------------")
 
         try:
+            api_key = chat_provider_manager.get_active_key(provider)
             start = time.monotonic()
             llm = _get_chat_llm(provider)
             chain = chain_builder(llm)
@@ -454,10 +492,214 @@ def stream_chat(chain_builder, invoke_args: dict):
         except Exception as e:
             error_msg = str(e).lower()
             if "rate" in error_msg and "limit" in error_msg or "429" in error_msg:
-                chat_provider_manager.mark_rate_limited(provider, 60.0)
+                chat_provider_manager.mark_rate_limited(provider, key_if_any=api_key, reset_after=60.0)
             else:
                 chat_provider_manager.record_failure(provider, type(e).__name__)
             last_error = e
             continue
 
     raise Exception(f"All chat stream providers failed. Last error: {last_error}")
+
+
+# ============================================================================
+# Document RAG Provider Pool — Completely independent from Audio pools
+# ============================================================================
+
+# Generation Pool: Gemini -> Groq -> HuggingFace (NO Ollama)
+document_provider_manager = ProviderManager(name="LLM-Document")
+
+# Chat Pool: Groq -> HuggingFace (NO Gemini, NO Ollama)
+document_chat_provider_manager = ProviderManager(name="LLM-Chat-Document")
+
+
+def _get_document_llm(provider: str):
+    """Get the LLM model for document RAG tasks (tree gen, summary, chat)."""
+    if provider == "gemini":
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            return ChatGoogleGenerativeAI(
+                model="gemini-1.5-flash",
+                google_api_key=document_provider_manager.get_active_key("gemini"),
+                temperature=0.3,
+                streaming=True,
+            )
+        except ImportError:
+            raise ImportError("langchain-google-genai not installed.")
+    elif provider == "groq":
+        return ChatGroq(
+            model="llama-3.3-70b-versatile",
+            api_key=document_provider_manager.get_active_key("groq"),
+            temperature=0.3,
+            streaming=True,
+        )
+    elif provider == "huggingface":
+        if not HF_AVAILABLE:
+            raise ImportError("langchain-huggingface not installed.")
+        llm = HuggingFaceEndpoint(
+            repo_id="Qwen/Qwen2.5-72B-Instruct",
+            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
+            task="text-generation",
+            max_new_tokens=4096,
+            streaming=True,
+        )
+        return ChatHuggingFace(llm=llm)
+    else:
+        raise ValueError(f"Unknown document provider: {provider}")
+
+
+def invoke_document(chain_builder, invoke_args: dict) -> str:
+    """
+    Execute a document LLM call with automatic failover.
+    Uses the Document provider pool: Gemini -> Groq -> HuggingFace.
+    """
+    last_error = None
+    api_key = "N/A"
+    for provider in ["gemini", "groq", "huggingface"]:
+        try:
+            rotator = document_provider_manager.providers[provider].key_rotator
+            max_retries = len(rotator.key_states) if rotator else 1
+            
+            for attempt in range(max_retries):
+                api_key = document_provider_manager.get_active_key(provider)
+                start = time.monotonic()
+                llm = _get_document_llm(provider)
+                chain = chain_builder(llm)
+                result = chain.invoke(invoke_args)
+                
+                latency_ms = (time.monotonic() - start) * 1000
+                document_provider_manager.record_success(provider, latency_ms)
+                logging.info(f"[OK] Document call completed via [{provider}] in {latency_ms:.0f}ms")
+                return result
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "rate" in error_msg and "limit" in error_msg or "429" in error_msg:
+                document_provider_manager.mark_rate_limited(provider, key_if_any=api_key, reset_after=60.0)
+                logging.warning(f"[WARN] [{provider}] document key hit rate limit, rotating...")
+            else:
+                document_provider_manager.record_failure(provider, type(e).__name__)
+                logging.error(f"[ERROR] [{provider}] document call failed: {e}")
+            last_error = e
+            continue
+
+    raise Exception(f"All document providers failed. Last error: {last_error}")
+
+
+
+def stream_document(chain_builder, invoke_args: dict):
+    """
+    Stream a document LLM response with automatic failover.
+    Uses the Document provider pool: Gemini -> Groq -> HuggingFace.
+    """
+    last_error = None
+    api_key = "N/A"
+    # Strict priority for Hackathon Speed
+    for provider in ["gemini", "groq", "huggingface"]:
+        try:
+            rotator = document_provider_manager.providers[provider].key_rotator
+            max_retries = len(rotator.key_states) if rotator else 1
+            
+            for attempt in range(max_retries):
+                api_key = document_provider_manager.get_active_key(provider)
+                start = time.monotonic()
+                llm = _get_document_llm(provider)
+                chain = chain_builder(llm)
+                
+                # Stream results
+                for chunk in chain.stream(invoke_args):
+                    yield chunk
+                
+                latency_ms = (time.monotonic() - start) * 1000
+                document_provider_manager.record_success(provider, latency_ms)
+                return
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "rate" in error_msg and "limit" in error_msg or "429" in error_msg:
+                document_provider_manager.mark_rate_limited(provider, key_if_any=api_key, reset_after=60.0)
+                logging.warning(f"[WARN] [{provider}] document key hit rate limit, rotating...")
+            else:
+                document_provider_manager.record_failure(provider, type(e).__name__)
+                logging.error(f"[ERROR] [{provider}] document stream failed: {e}")
+            last_error = e
+            continue
+
+    logging.error(f"All document providers failed during stream. Last: {last_error}")
+    yield f"ERROR: All providers failed. {last_error}"
+
+
+# ============================================================================
+# Document Chat Pool — Strictly NO Gemini, NO Ollama
+# ============================================================================
+
+def _get_document_chat_llm(provider: str):
+    """Get the LLM model for document chat tasks (Gemini/Groq/HF)."""
+    if provider == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        return ChatGoogleGenerativeAI(
+            model="gemini-1.5-flash",
+            google_api_key=document_chat_provider_manager.get_active_key("gemini"),
+            temperature=0.7,
+            streaming=True,
+        )
+    elif provider == "groq":
+        return ChatGroq(
+            model="llama-3.3-70b-versatile",
+            api_key=document_chat_provider_manager.get_active_key("groq"),
+            temperature=0.7,
+            streaming=True,
+        )
+    elif provider == "huggingface":
+        if not HF_AVAILABLE:
+            raise ImportError("langchain-huggingface not installed.")
+        llm = HuggingFaceEndpoint(
+            repo_id="mistralai/Mistral-7B-Instruct-v0.3",
+            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
+            task="text-generation",
+            max_new_tokens=2048,
+            streaming=True,
+        )
+        return ChatHuggingFace(llm=llm)
+    else:
+        raise ValueError(f"Provider {provider} not allowed for Document Chat.")
+
+def invoke_document_chat(chain_builder, invoke_args: dict) -> str:
+    """Execute a document chat call with Gemini -> Groq -> HF failover."""
+    last_error = None
+    api_key = "N/A"
+    for provider in ["gemini", "groq", "huggingface"]:
+        try:
+            api_key = document_chat_provider_manager.get_active_key(provider)
+            start = time.monotonic()
+            llm = _get_document_chat_llm(provider)
+            chain = chain_builder(llm)
+            result = chain.invoke(invoke_args)
+            
+            latency_ms = (time.monotonic() - start) * 1000
+            document_chat_provider_manager.record_success(provider, latency_ms)
+            return result
+        except Exception as e:
+            logging.error(f"[ERROR] [{provider}] document chat call failed: {e}")
+            document_chat_provider_manager.record_failure(provider, type(e).__name__)
+            last_error = e
+            continue
+    raise Exception(f"All document chat providers failed. Last: {last_error}")
+
+def stream_document_chat(chain_builder, invoke_args: dict):
+    """Stream a document chat response with Gemini -> Groq -> HF failover."""
+    last_error = None
+    for provider in ["gemini", "groq", "huggingface"]:
+        try:
+            start = time.monotonic()
+            llm = _get_document_chat_llm(provider)
+            chain = chain_builder(llm)
+            for chunk in chain.stream(invoke_args):
+                yield chunk
+            latency_ms = (time.monotonic() - start) * 1000
+            document_chat_provider_manager.record_success(provider, latency_ms)
+            return
+        except Exception as e:
+            logging.error(f"[ERROR] [{provider}] document chat stream failed: {e}")
+            document_chat_provider_manager.record_failure(provider, type(e).__name__)
+            last_error = e
+            continue
+    yield f"ERROR: All chat providers failed. {last_error}"
+

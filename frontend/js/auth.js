@@ -9,10 +9,7 @@ if (localStorage.getItem('isAuthenticated') === 'true' && !hasAuthToken()) {
 }
 
 // Check for existing login flag on page load
-if (localStorage.getItem('isAuthenticated') === 'true') {
-    // Rely on original local flag logic for speed/offline support
-    window.location.replace('chat.html');
-}
+// REMOVED: Auto-redirect to chat.html. Users must explicitly select a workspace on index.html.
 
 document.addEventListener('DOMContentLoaded', () => {
     
@@ -22,13 +19,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const errorMessage = document.getElementById('error-message');
     const successMessage = document.getElementById('success-message');
 
+    // Link preservation: Ensure 'mode' is passed between login/signup pages
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentMode = urlParams.get('mode');
+    if (currentMode) {
+        const authLinks = document.querySelectorAll('.auth-footer a, .nav-links a');
+        authLinks.forEach(link => {
+            const href = link.getAttribute('href');
+            if (href && (href.includes('login.html') || href.includes('signup.html'))) {
+                const separator = href.includes('?') ? '&' : '?';
+                link.setAttribute('href', `${href}${separator}mode=${currentMode}`);
+            }
+        });
+    }
+
     function showError(msg) {
+        if (!errorMessage) return;
         errorMessage.innerText = msg;
         errorMessage.style.display = 'block';
         if(successMessage) successMessage.style.display = 'none';
     }
 
     function showSuccess(msg) {
+        if (!successMessage) return;
         successMessage.innerText = msg;
         successMessage.style.display = 'block';
         if(errorMessage) errorMessage.style.display = 'none';
@@ -59,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 
                 if (res.ok) {
-                    // Automatically log in the user to get the JWT cookie
+                    // Automatically log in the user
                     const loginRes = await fetch(`${API_BASE_URL}/login`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -72,7 +85,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         localStorage.setItem('userName', name);
                         showSuccess("Account created! Logging you in...");
                         setTimeout(() => {
-                            window.location.replace('chat.html');
+                            const mode = urlParams.get('mode');
+                            // If no mode, go to index.html to select one
+                            const redirectUrl = mode ? `chat.html?mode=${mode}` : '../index.html';
+                            window.location.replace(redirectUrl);
                         }, 500);
                     } else {
                         showError("Account created, but automatic login failed. Please log in.");
@@ -102,7 +118,6 @@ document.addEventListener('DOMContentLoaded', () => {
             loginBtn.disabled = true;
 
             try {
-                // Important: Include credentials to accept the secure HttpOnly cookie!
                 const res = await fetch(`${API_BASE_URL}/login`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -117,7 +132,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (data.name) localStorage.setItem('userName', data.name);
                     loginBtn.innerHTML = 'Success!';
                     setTimeout(() => {
-                        window.location.replace('chat.html');
+                        const mode = urlParams.get('mode');
+                        // If no mode, go to index.html to select one
+                        const redirectUrl = mode ? `chat.html?mode=${mode}` : '../index.html';
+                        window.location.replace(redirectUrl);
                     }, 500);
                 } else {
                     showError(data.detail || 'Login failed. Please check credentials.');
@@ -125,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (err) {
                 showError('Could not connect to the server. Is it running?');
             } finally {
-                if(loginBtn.innerHTML !== 'Success!') {
+                if(loginBtn && loginBtn.innerHTML !== 'Success!') {
                     loginBtn.innerHTML = 'Log In';
                     loginBtn.disabled = false;
                 }

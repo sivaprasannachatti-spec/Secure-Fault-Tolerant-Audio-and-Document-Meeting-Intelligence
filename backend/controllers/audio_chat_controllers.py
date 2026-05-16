@@ -1,11 +1,11 @@
 import sys
-
+from postgrest.exceptions import APIError
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from src.exception import CustomException
 from src.logger import logging
 from backend.models.DB_Client import supabase
-from backend.services.chat_services import createNewChat, createOldChat, generateChatTitle, streamNewChat, streamOldChat, generateMeetingTitle
+from backend.services.audio_chat_services import createNewChat, createOldChat, generateChatTitle, streamNewChat, streamOldChat, generateMeetingTitle
 from src.prompts.prompts import getPrompts
 from backend.utils.SQlite_utils import (
     getMeetingandChattingId, getMessages, getMeetingData, insertChats, 
@@ -17,6 +17,12 @@ from src.components.meeting_minutes import MeetingProcessor
 from backend.utils.SQlite_utils import save_meeting_offline, save_meeting_placeholder, update_meeting
 from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import StrOutputParser
+import asyncio
+
+# Global Semaphore to prevent multiple concurrent heavy AI tasks (Whisper/Diarization)
+# This ensures the server remains responsive even under heavy upload load.
+TRANSCRIPTION_SEMAPHORE = asyncio.Semaphore(1)
+
 def handleMeetingGeneration(request, audio_bytes, is_department_wide):
     try:
         import json
@@ -30,48 +36,52 @@ def handleMeetingGeneration(request, audio_bytes, is_department_wide):
         dept_id = request.state.user['dept_id']
         team_id = request.state.user.get('team_id')
 
-        def stream_pipeline():
-            meeting_obj = MeetingProcessor()
-            final_report = None
-
-            # Stream all pipeline stages (transcription → summary → action items → key decisions → format)
-            for event in meeting_obj.streamMeetingMinutes(target_dept=dept_id, cleaned_audio=cleaned_audio):
-                # Capture the final report from the 'complete' event
-                try:
-                    event_data = event.replace("data: ", "").strip()
-                    parsed = json.loads(event_data)
-                    if parsed.get('stage') == 'complete':
-                        final_report = parsed.get('final_report', '')
-                except:
-                    pass
-                yield event
-
-            # After pipeline completes, generate title and save to DB
-            if final_report:
-                yield f"data: {json.dumps({'stage': 'saving', 'status': 'in_progress'})}\n\n"
-                
-                meeting_title = generateMeetingTitle(prompt=getPrompts()[3], final_report=final_report)
-                
-                if online:
-                    response = (
-                        supabase.table("meetings")
-                        .insert({
-                            "target_dept": dept_id, 
-                            "team_id": team_id, 
-                            "is_department_wide": is_department_wide, 
-                            "final_report": final_report,
-                            "meeting_title": meeting_title
-                        })
-                        .execute()
-                    )
-                    generated_id = response.data[0]['meeting_id'] if response.data else None
-                else:
-                    from backend.utils.SQlite_utils import save_meeting_offline
-                    generated_id = save_meeting_offline(dept_id, team_id, is_department_wide, final_report, meeting_title)
-
-                yield f"data: {json.dumps({'stage': 'saved', 'meeting_id': generated_id, 'meeting_title': meeting_title, 'final_report': final_report})}\n\n"
+        async def stream_pipeline():
+            from fastapi.concurrency import iterate_in_threadpool
             
-            yield "data: [DONE]\n\n"
+            # Acquire semaphore to prevent CPU/GPU starvation
+            async with TRANSCRIPTION_SEMAPHORE:
+                meeting_obj = MeetingProcessor()
+                final_report = None
+                meeting_title = "Untitled Meeting"
+
+                # iterate_in_threadpool runs the synchronous generator in a separate thread
+                async for event in iterate_in_threadpool(meeting_obj.streamMeetingMinutes(target_dept=dept_id, cleaned_audio=cleaned_audio)):
+                    try:
+                        event_data = event.replace("data: ", "").strip()
+                        parsed = json.loads(event_data)
+                        if parsed.get('stage') == 'title' and parsed.get('status') == 'done':
+                            meeting_title = parsed.get('final_text', 'Untitled Meeting')
+                        if parsed.get('stage') == 'complete':
+                            final_report = parsed.get('final_report', '')
+                    except:
+                        pass
+                    yield event
+
+                # After pipeline completes, save everything to DB
+                if final_report:
+                    yield f"data: {json.dumps({'stage': 'saving', 'status': 'in_progress'})}\n\n"
+                    
+                    if online:
+                        response = (
+                            supabase.table("meetings")
+                            .insert({
+                                "target_dept": dept_id, 
+                                "team_id": team_id, 
+                                "is_department_wide": is_department_wide, 
+                                "final_report": final_report,
+                                "meeting_title": meeting_title
+                            })
+                            .execute()
+                        )
+                        generated_id = response.data[0]['meeting_id'] if response.data else None
+                    else:
+                        from backend.utils.SQlite_utils import save_meeting_offline
+                        generated_id = save_meeting_offline(dept_id, team_id, is_department_wide, final_report, meeting_title)
+
+                    yield f"data: {json.dumps({'stage': 'saved', 'meeting_id': generated_id, 'meeting_title': meeting_title, 'final_report': final_report})}\n\n"
+                
+                yield "data: [DONE]\n\n"
 
         return StreamingResponse(stream_pipeline(), media_type="text/event-stream")
 
@@ -127,7 +137,7 @@ def handleNewChat(msg, request):
         import json
         def stream_with_title():
             # Send chat_title as first SSE event so frontend can update the sidebar
-            yield f"data: {json.dumps({'chat_title': chat_title})}\n\n"
+            yield f"data: {json.dumps({'chat_title': chat_title, 'chat_id': chat_id})}\n\n"
             # Then stream all tokens
             yield from streamNewChat(msg=msg, chat_id=chat_id, final_report=meeting.get('final_report', ''), online=online)
 
@@ -156,8 +166,9 @@ def handleOldChat(chat_id, msg, request):
 
             meeting = (
                 supabase.table("meetings")
-                .select("target_dept, team_id, is_department_wide, final_report")
+                .select("target_dept, team_id, is_department_wide, final_report, meeting_type")
                 .eq("meeting_id", meeting_id)
+                .eq("meeting_type", "audio")
                 .execute()
             )
             if not meeting.data:
@@ -178,8 +189,8 @@ def handleOldChat(chat_id, msg, request):
             
             meeting_id = chat_info['meeting_id']
             meeting = getMeetingData(meeting_id=meeting_id)
-            if meeting is None:
-                raise HTTPException(status_code=404, detail="No offline meeting found")
+            if meeting is None or meeting.get('meeting_type') != 'audio':
+                raise HTTPException(status_code=404, detail="No offline audio meeting found")
             
             target_dept = meeting['target_dept']
             team_id = meeting.get('team_id')
@@ -227,8 +238,9 @@ def handleGettingOldChat(chat_id, request):
 
             meeting = (
                 supabase.table("meetings")
-                .select("target_dept, team_id, is_department_wide, final_report")
+                .select("target_dept, team_id, is_department_wide, final_report, meeting_type")
                 .eq("meeting_id", meeting_id)
+                .eq("meeting_type", "audio")
                 .execute()
             )
             if not meeting.data:
@@ -246,8 +258,8 @@ def handleGettingOldChat(chat_id, request):
             meeting_id = chat_info['meeting_id']
             
             target_dept_info = getMeetingData(meeting_id=meeting_id)
-            if target_dept_info is None:
-                raise HTTPException(status_code=404, detail="No offline meeting found")
+            if target_dept_info is None or target_dept_info.get('meeting_type') != 'audio':
+                raise HTTPException(status_code=404, detail="No offline audio meeting found")
             target_dept = target_dept_info['target_dept']
             team_id = target_dept_info.get('team_id')
             is_department_wide = target_dept_info.get('is_department_wide')
@@ -276,7 +288,8 @@ def handleGettingOldChat(chat_id, request):
             "message": "Old chat retrieved successfully", 
             "chat": chat_history,
             "final_report": final_report,
-            "meeting_id": meeting_id
+            "meeting_id": meeting_id,
+            "meeting_type": "audio"
         })
     except Exception as e:
         raise CustomException(e, sys)
@@ -293,15 +306,28 @@ def handleGetAllChats(request):
             except Exception as sync_e:
                 logging.warning(f"Background sync failed: {sync_e}")
 
-            response = (
-                supabase.table("chats")
-                .select("chat_title, chat_id")
-                .eq("id", user_id)
-                .execute()
-            )
+            try:
+                response = (
+                    supabase.table("chats")
+                    .select("chat_title, chat_id, meetings!inner(meeting_type)")
+                    .eq("id", user_id)
+                    .eq("meetings.meeting_type", "audio")
+                    .execute()
+                )
+            except APIError as e:
+                if "meeting_type" in str(e):
+                    logging.warning("⚠️ Supabase 'meeting_type' column missing. Falling back to non-isolated query.")
+                    response = (
+                        supabase.table("chats")
+                        .select("chat_title, chat_id, meetings!inner(meeting_id)")
+                        .eq("id", user_id)
+                        .execute()
+                    )
+                else:
+                    raise e
             chats = response.data
         else:
-            chats = getChatsByUserId(user_id=user_id)
+            chats = getChatsByUserId(user_id=user_id, meeting_type='audio')
             
         return JSONResponse(status_code=200, content={"message": "Chats retrieved successfully", "chats": chats})
     except Exception as e:
@@ -318,12 +344,37 @@ def handleGetAllMeetings(request):
             # 2. Fetch ALL meetings that belong to this exact department
             logging.info(f"🔍 Fetching meetings for Dept: {dept_id}, User Team: {team_id}")
             
-            response = (
-                supabase.table("meetings")
-                .select("meeting_id, target_dept, meeting_title, final_report, team_id, is_department_wide")
-                .eq("target_dept", dept_id)
-                .execute()
-            )
+            response = None
+            last_err = None
+            for attempt in range(3):
+                try:
+                    response = (
+                        supabase.table("meetings")
+                        .select("meeting_id, target_dept, meeting_title, final_report, team_id, is_department_wide, meeting_type")
+                        .eq("target_dept", dept_id)
+                        .eq("meeting_type", "audio")
+                        .execute()
+                    )
+                    break
+                except Exception as e:
+                    last_err = e
+                    if "meeting_type" in str(e):
+                        logging.warning("⚠️ Supabase 'meeting_type' column missing in meetings table. Falling back to non-isolated query.")
+                        try:
+                            response = (
+                                supabase.table("meetings")
+                                .select("meeting_id, target_dept, meeting_title, final_report, team_id, is_department_wide")
+                                .eq("target_dept", dept_id)
+                                .execute()
+                            )
+                            break
+                        except: pass
+                    logging.warning(f"🔄 Supabase fetch attempt {attempt+1} failed: {e}. Retrying...")
+                    import time
+                    time.sleep(1) # Brief pause before retry
+
+            if not response:
+                raise last_err if last_err else Exception("Failed to fetch meetings after retries")
             
             # Use STR comparison to avoid type mismatches (int vs string)
             valid_meetings = []
@@ -352,7 +403,7 @@ def handleGetAllMeetings(request):
         else:
             # 4. Fetch the department meetings from the local SQLite DB if offline
             from backend.utils.SQlite_utils import getMeetingsByDept
-            meetings = getMeetingsByDept(dept_id=dept_id)
+            meetings = getMeetingsByDept(dept_id=dept_id, meeting_type='audio')
             valid_meetings = []
             for m in meetings:
                 report = m.get('final_report')

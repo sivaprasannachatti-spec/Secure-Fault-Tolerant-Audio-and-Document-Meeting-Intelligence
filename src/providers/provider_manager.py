@@ -5,12 +5,31 @@ Tracks health, latency, rate limits, and failures for each inference provider.
 Selects the best available provider with automatic failover.
 """
 
+import platform
+# Python 3.14 Windows Hang Fix
+if not hasattr(platform, '_monkeypatched'):
+    platform.system = lambda: "Windows"
+    platform.release = lambda: "10"
+    platform.version = lambda: "10.0.19041"
+    platform.python_version = lambda: "3.14.3"
+    platform._monkeypatched = True
+
+import os
 import time
 import threading
 from enum import Enum
 from dataclasses import dataclass, field
 from src.logger import logging
 
+# ============================================================================
+# Enums & State Objects
+# ============================================================================
+
+class KeyStatus(Enum):
+    ACTIVE = "active"
+    RATE_LIMITED = "rate_limited"
+    COOLDOWN = "cooldown"
+    FAILED = "failed"
 
 class ProviderStatus(Enum):
     HEALTHY = "healthy"
@@ -18,6 +37,89 @@ class ProviderStatus(Enum):
     RATE_LIMITED = "rate_limited"
     DOWN = "down"
 
+@dataclass
+class KeyState:
+    """Tracks individual API key health and quotas."""
+    key: str
+    status: KeyStatus = KeyStatus.ACTIVE
+    last_used: float = 0.0
+    cooldown_until: float = 0.0
+    failure_count: int = 0
+    total_calls: int = 0
+
+# ============================================================================
+# Key Rotator (The "Key Pool" Orchestrator)
+# ============================================================================
+
+class KeyRotator:
+    """Enterprise-grade Multi-Key Orchestrator with Round-Robin and Recovery."""
+    def __init__(self, env_var_name: str, cooldown_seconds: int = 60):
+        self.env_var_name = env_var_name
+        self.cooldown_seconds = cooldown_seconds
+        
+        raw = os.getenv(env_var_name, "")
+        keys = [k.strip() for k in raw.split(",") if k.strip()]
+        
+        # If the plural variable is empty, try the singular fallback
+        if not keys:
+            singular = os.getenv(env_var_name.replace("_KEYS", "_KEY"), "")
+            if singular: keys = [singular]
+
+        self.key_states = [KeyState(key=k) for k in keys]
+        self.current_ptr = 0
+        self.lock = threading.Lock()
+        
+        if keys:
+            logging.info(f"🔑 [{env_var_name}] Initialized with {len(keys)} keys.")
+
+    def get_key(self) -> str:
+        """Selects the next available key using Round-Robin logic."""
+        with self.lock:
+            if not self.key_states:
+                return None
+            
+            now = time.time()
+            
+            # 1. Recover keys from cooldown
+            for state in self.key_states:
+                if state.status in (KeyStatus.RATE_LIMITED, KeyStatus.COOLDOWN):
+                    if now >= state.cooldown_until:
+                        state.status = KeyStatus.ACTIVE
+                        logging.info(f"♻️ Key Recovery: Key index {self.key_states.index(state)} for {self.env_var_name} is back online.")
+
+            # 2. Find next ACTIVE key starting from current_ptr (Round Robin)
+            for i in range(len(self.key_states)):
+                idx = (self.current_ptr + i) % len(self.key_states)
+                state = self.key_states[idx]
+                if state.status == KeyStatus.ACTIVE:
+                    self.current_ptr = (idx + 1) % len(self.key_states)
+                    state.last_used = now
+                    state.total_calls += 1
+                    return state.key
+            
+            return None # All keys currently limited/down
+
+    def mark_limited(self, key: str):
+        """Sidelining a specific key without killing the whole provider."""
+        with self.lock:
+            for state in self.key_states:
+                if state.key == key:
+                    state.status = KeyStatus.RATE_LIMITED
+                    state.cooldown_until = time.time() + self.cooldown_seconds
+                    logging.warning(f"⏳ Key Sidelined: Index {self.key_states.index(state)} for {self.env_var_name} hit rate limit. Cooldown: {self.cooldown_seconds}s")
+                    break
+
+    def has_active_keys(self) -> bool:
+        """Check if at least one key is available."""
+        with self.lock:
+            now = time.time()
+            # A provider is available if it has an active key OR a key whose cooldown is about to expire
+            return any(s.status == KeyStatus.ACTIVE or now >= s.cooldown_until for s in self.key_states)
+
+
+# ============================================================================
+# Provider State (The "Service" Orchestrator)
+# ============================================================================
 
 @dataclass
 class ProviderState:
@@ -32,6 +134,7 @@ class ProviderState:
     avg_latency_ms: float = 0.0
     rate_limit_reset_at: float = 0.0
     _latency_window: list = field(default_factory=list)
+    key_rotator: KeyRotator = None
 
     # Thresholds
     MAX_CONSECUTIVE_FAILURES: int = 3
@@ -73,11 +176,18 @@ class ProviderState:
             self.status = ProviderStatus.DEGRADED
             logging.warning(f"🟡 [{self.name}] Marked DEGRADED ({error_type})")
 
-    def mark_rate_limited(self, reset_after_seconds: float = 60.0):
-        """Mark provider as rate-limited with a reset time."""
+    def mark_rate_limited(self, key_if_any: str = None, reset_after_seconds: float = 60.0):
+        """Mark provider as rate-limited, or rotate keys if available."""
+        if self.key_rotator and key_if_any:
+            self.key_rotator.mark_limited(key_if_any)
+            if self.key_rotator.has_active_keys():
+                # We have more keys! Don't mark provider as limited yet.
+                self.status = ProviderStatus.HEALTHY
+                return
+
         self.status = ProviderStatus.RATE_LIMITED
         self.rate_limit_reset_at = time.time() + reset_after_seconds
-        logging.warning(f"⚠️ [{self.name}] RATE LIMITED — will retry after {reset_after_seconds:.0f}s")
+        logging.warning(f"⚠️ [{self.name}] ALL KEYS EXHAUSTED — switching provider. Retry after {reset_after_seconds:.0f}s")
 
     def is_available(self) -> bool:
         """Check if this provider can accept requests right now."""
@@ -95,6 +205,17 @@ class ProviderState:
         return False  # DOWN
 
 
+# ============================================================================
+# Global registry to share KeyRotator instances across different ProviderManagers
+# This ensures that if a key is rate-limited in 'Audio', the 'Document' manager knows it immediately.
+_rotator_registry = {}
+
+def get_shared_rotator(env_var_name: str) -> KeyRotator:
+    """Helper to get or create a shared KeyRotator for a specific environment variable."""
+    if env_var_name not in _rotator_registry:
+        _rotator_registry[env_var_name] = KeyRotator(env_var_name)
+    return _rotator_registry[env_var_name]
+
 class ProviderManager:
     """
     Manages multiple inference providers with automatic failover.
@@ -105,33 +226,103 @@ class ProviderManager:
         self._lock = threading.Lock()
         self.name = name
         
-        # ASR uses Groq -> Local Whisper. Generation/Chat use Groq -> HF -> Ollama.
-        # We handle the specific provider names differently if it's the ASR manager.
         if name == "ASR":
             self.providers = {
                 "assemblyai": ProviderState(name=f"AssemblyAI-{name}"),
                 "deepgram": ProviderState(name=f"Deepgram-{name}"),
             }
             self.priority_order = ["assemblyai", "deepgram"]
-        else:
+            
+        elif name == "LLM-Document":
+            # High-throughput chain for Document Intelligence (Gemini First, NO Ollama)
             self.providers = {
-                "groq": ProviderState(name=f"Groq-{name}"),
+                "gemini": ProviderState(
+                    name=f"Gemini-{name}", 
+                    key_rotator=get_shared_rotator("GEMINI_API_KEYS")
+                ),
+                "groq": ProviderState(
+                    name=f"Groq-{name}", 
+                    key_rotator=get_shared_rotator("GROQ_API_KEYS")
+                ),
+                "huggingface": ProviderState(name=f"HuggingFace-{name}"),
+            }
+            self.priority_order = ["gemini", "groq", "huggingface"]
+
+        elif name == "LLM-Generation":
+            # High-throughput chain for Audio Synthesis (Groq First, includes Ollama)
+            self.providers = {
+                "groq": ProviderState(
+                    name=f"Groq-{name}", 
+                    key_rotator=get_shared_rotator("GROQ_API_KEYS")
+                ),
+                "gemini": ProviderState(
+                    name=f"Gemini-{name}", 
+                    key_rotator=get_shared_rotator("GEMINI_API_KEYS")
+                ),
+                "huggingface": ProviderState(name=f"HuggingFace-{name}"),
+                "ollama": ProviderState(name=f"Ollama-{name}"),
+            }
+            self.priority_order = ["groq", "gemini", "huggingface", "ollama"]
+            
+        elif name == "LLM-Chat-Document":
+            # Snappy, high-quality chain for Document Chat (Gemini First, NO Ollama)
+            self.providers = {
+                "gemini": ProviderState(
+                    name=f"Gemini-{name}", 
+                    key_rotator=get_shared_rotator("GEMINI_API_KEYS")
+                ),
+                "groq": ProviderState(
+                    name=f"Groq-{name}", 
+                    key_rotator=get_shared_rotator("GROQ_API_KEYS")
+                ),
+                "huggingface": ProviderState(name=f"HuggingFace-{name}"),
+            }
+            self.priority_order = ["gemini", "groq", "huggingface"]
+
+        elif name == "LLM-Chat":
+            # Snappy, low-latency chain for Conversational Chat
+            self.providers = {
+                "groq": ProviderState(
+                    name=f"Groq-{name}", 
+                    key_rotator=get_shared_rotator("GROQ_API_KEYS")
+                ),
                 "huggingface": ProviderState(name=f"HuggingFace-{name}"),
                 "ollama": ProviderState(name=f"Ollama-{name}"),
             }
             self.priority_order = ["groq", "huggingface", "ollama"]
             
-        logging.info(f"🧠 Provider Manager [{name}] initialized")
+        else:
+            # Default fallback for any other unnamed pool
+            self.providers = {
+                "groq": ProviderState(name=f"Groq-{name}"),
+                "ollama": ProviderState(name=f"Ollama-{name}"),
+            }
+            self.priority_order = ["groq", "ollama"]
+            
+        logging.info(f"🧠 Provider Manager [{name}] initialized with chain: {' -> '.join(self.priority_order)}")
+
+    def get_active_key(self, provider_name: str) -> str:
+        """Retrieves the current active API key for a provider."""
+        with self._lock:
+            if provider_name in self.providers:
+                state = self.providers[provider_name]
+                if state.key_rotator:
+                    return state.key_rotator.get_key()
+            # Default to env if no rotator
+            env_map = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY", "huggingface": "HUGGING_FACE_ACCESS_TOKEN"}
+            return os.getenv(env_map.get(provider_name, ""), "")
 
     def select_provider(self) -> str:
-        """
-        Select the best available provider based on priority and health.
-        Returns provider name string.
-        """
+        """Select the best available provider based on priority and health."""
         with self._lock:
             for name in self.priority_order:
                 state = self.providers[name]
                 if state.is_available():
+                    # If it has a key rotator, check if it has keys available
+                    if state.key_rotator:
+                        if state.key_rotator.has_active_keys():
+                            return name
+                        continue # No active keys for this provider, try next
                     return name
 
             # All cloud providers down — force fallback
@@ -140,7 +331,7 @@ class ProviderManager:
                 self.providers["deepgram"].status = ProviderStatus.HEALTHY
                 return "deepgram"
             else:
-                logging.warning("⚠️ All cloud LLM providers unavailable — forcing Ollama fallback")
+                logging.warning("⚠️ ALL CLOUD PROVIDERS EXHAUSTED — ACTIVATING OLLAMA FALLBACK")
                 self.providers["ollama"].status = ProviderStatus.HEALTHY
                 return "ollama"
 
@@ -156,17 +347,25 @@ class ProviderManager:
             if provider_name in self.providers:
                 self.providers[provider_name].record_failure(error_type)
 
-    def mark_rate_limited(self, provider_name: str, reset_after: float = 60.0):
+    def mark_rate_limited(self, provider_name: str, key_if_any: str = None, reset_after: float = 60.0):
         """Mark a provider as rate-limited."""
         with self._lock:
             if provider_name in self.providers:
-                self.providers[provider_name].mark_rate_limited(reset_after)
+                self.providers[provider_name].mark_rate_limited(key_if_any, reset_after)
 
     def get_active_providers(self) -> list:
         """Returns a list of provider names that are currently available, in priority order."""
         with self._lock:
-            return [name for name in self.priority_order if self.providers[name].is_available()]
-
+            active = []
+            for name in self.priority_order:
+                state = self.providers[name]
+                if state.is_available():
+                    if state.key_rotator:
+                        if state.key_rotator.has_active_keys():
+                            active.append(name)
+                    else:
+                        active.append(name)
+            return active
 
     def get_status_report(self) -> dict:
         """Get a snapshot of all provider statuses for monitoring."""
@@ -177,18 +376,10 @@ class ProviderManager:
                     "avg_latency_ms": round(state.avg_latency_ms, 1),
                     "consecutive_failures": state.consecutive_failures,
                     "total_requests": state.total_requests,
+                    "keys_active": len([s for s in state.key_rotator.key_states if s.status == KeyStatus.ACTIVE]) if state.key_rotator else "N/A"
                 }
                 for name, state in self.providers.items()
             }
-
-    def force_recover(self, provider_name: str):
-        """Manually force a provider back to healthy (used by health monitor)."""
-        with self._lock:
-            if provider_name in self.providers:
-                self.providers[provider_name].status = ProviderStatus.HEALTHY
-                self.providers[provider_name].consecutive_failures = 0
-                logging.info(f"💚 [{provider_name}] Force-recovered to HEALTHY by health monitor")
-
 
 # Global singleton instance
 provider_manager = ProviderManager(name="ASR")

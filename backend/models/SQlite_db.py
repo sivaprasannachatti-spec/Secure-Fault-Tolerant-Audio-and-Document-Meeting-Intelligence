@@ -7,11 +7,13 @@ from backend.utils.user_utils import isOnline
 from src.exception import CustomException
 from src.logger import logging
 
-DB_FILE = "offline_queue.db"
+# Use environment variable for DB file to allow dual-server isolation
+DB_FILE = os.getenv("DB_FILE", "offline_queue.db").strip()
 
 def setup_offline_database():
     try:
-        conn = sqlite3.connect(os.environ['DB_FILE'])
+        # Crucial: Use the environment-specific DB file
+        conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
 
         # Enable Foreign Key enforcement in SQLite
@@ -63,8 +65,22 @@ def setup_offline_database():
                 is_department_wide INTEGER DEFAULT 0,
                 final_report TEXT,
                 meeting_title TEXT,
+                meeting_type TEXT DEFAULT 'audio',
                 synced INTEGER DEFAULT 0,
                 FOREIGN KEY (target_dept) REFERENCES departments(dept_id)
+            )
+        """)
+        
+        # Document Trees table for Vectorless RAG (NOT synced to Supabase)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS document_trees (
+                tree_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id INTEGER UNIQUE,
+                tree_json TEXT NOT NULL,
+                file_type TEXT,
+                token_count INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (meeting_id) REFERENCES meetings(meeting_id)
             )
         """)
         
@@ -77,6 +93,9 @@ def setup_offline_database():
         except: pass
         try:
             cursor.execute("ALTER TABLE meetings ADD COLUMN is_department_wide INTEGER DEFAULT 0")
+        except: pass
+        try:
+            cursor.execute("ALTER TABLE meetings ADD COLUMN meeting_type TEXT DEFAULT 'audio'")
         except: pass
         
         # Pre-populate departments
@@ -96,7 +115,7 @@ def sync_all_users_to_sqlite():
         response = (supabase.table("users").select("id", "name", "email", "dept_id", "team_id").execute())
         all_users = response.data
 
-        conn = sqlite3.connect(os.environ['DB_FILE'])
+        conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
 
         for user in all_users:
@@ -111,7 +130,7 @@ def sync_all_users_to_sqlite():
     
 def get_user_from_sqlite(email: str):
     try:
-        conn = sqlite3.connect(os.environ['DB_FILE'])
+        conn = sqlite3.connect(DB_FILE)
         conn.row_factory = sqlite3.Row  # Makes it return a Dict-like object
         cursor = conn.cursor()
         

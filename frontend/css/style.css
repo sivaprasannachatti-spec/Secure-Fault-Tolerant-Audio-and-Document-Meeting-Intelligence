@@ -1511,3 +1511,51 @@ details[class="thinking-block"] > summary::-webkit-details-marker {
     text-align: center;
     padding: 8px 0;
 }
+
+/* ===== DOCUMENT WORKFLOW STYLES ===== */
+
+/* Landing Page: Two CTA Buttons */
+.btn-notes {
+    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+    color: #ffffff !important;
+}
+
+.btn-notes:hover {
+    box-shadow: 0 6px 25px rgba(99, 102, 241, 0.3);
+}
+
+.hero-cta .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.hero-cta .btn-primary svg {
+    flex-shrink: 0;
+}
+
+/* Modal Mode Toggle */
+.modal-mode-toggle .mode-btn.active {
+    background: var(--accent-gradient) !important;
+    color: white !important;
+    box-shadow: 0 2px 12px rgba(99, 102, 241, 0.25);
+}
+
+.modal-mode-toggle .mode-btn:not(.active):hover {
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Force-hide the mode toggle to ensure strict workspace isolation */
+.modal-mode-toggle {
+    display: none !important;
+}
+
+/* Modal Content Transition */
+#chat-upload-form > div {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.modal-mode-toggle[style*="display: none"] + div {
+    margin-top: 0 !important;
+}

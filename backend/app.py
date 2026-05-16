@@ -1,78 +1,111 @@
+import patch_platform
 import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from backend.routes.user_routes import user_router
-from backend.routes.chat_routes import chat_router
+from backend.routes.audio_chat_routes import chat_router
+from backend.routes.document_notes_routes import document_notes_router
 from backend.models.SQlite_db import setup_offline_database, sync_all_users_to_sqlite
 from backend.utils.SQlite_utils import sync_offline_data_to_supabase
+from fastapi.middleware.cors import CORSMiddleware
+import psutil
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Setup and sync the offline SQLite DB when the server starts
-    setup_offline_database()
-    sync_all_users_to_sqlite()
-    sync_offline_data_to_supabase()
-    
-    # Warmup: Pre-load LLM models into Ollama's memory so the first user request is fast
-    print(">>> Warming up AI models...")
-    try:
-        from src.utils import LLAMA_MODEL, QWEN_MODEL
-        LLAMA_MODEL.invoke("hi")  # Forces Ollama to load llama3.2:3b into memory
-        print("  Chat model (llama3.2:3b) loaded")
-        QWEN_MODEL.invoke("hi")   # Forces Ollama to load qwen3:8b into memory
-        print("  Generation model (qwen3:8b) loaded")
-    except Exception as e:
-        print(f"  ⚠️ Model warmup failed (non-critical): {e}")
-    print("🚀 Server ready! All models pre-loaded.")
-    
-    # Start Health Monitor for multi-provider inference orchestration
-    from src.providers.health_monitor import health_monitor
-    from src.providers.provider_manager import provider_manager as asr_manager
-    from src.providers.llm_service import generation_provider_manager, chat_provider_manager
-    
-    health_monitor.register_manager(asr_manager)
-    health_monitor.register_manager(generation_provider_manager)
-    health_monitor.register_manager(chat_provider_manager)
-    await health_monitor.start()
-    
-    yield
-    
-    # Shutdown: stop health monitor
-    await health_monitor.stop()
+app = FastAPI(
+    title="Meeting Assistant API",
+    description="Backend API for Audio and Document Intelligence",
+    version="2.0.0"
+)
 
-app = FastAPI(lifespan=lifespan)
-
-# Enable CORS for frontend requests
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5500"
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(router=user_router, prefix="/api/user")
-app.include_router(router=chat_router, prefix="/api/chat")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Initializing Server Lifespan...")
+    # Setup and sync the offline SQLite DB when the server starts
+    setup_offline_database()
+    
+    # Sync in background to prevent startup hang
+    # sync_all_users_to_sqlite()
+    # sync_offline_data_to_supabase()
+    
+    # Robust mode detection
+    mode = os.getenv("APP_MODE", "AUDIO").strip().upper()
+    print(f"Detected APP_MODE: {mode}")
+    
+    # Start Health Monitor
+    print("Starting Health Monitor...")
+    from src.providers.health_monitor import health_monitor
+    from src.providers.provider_manager import provider_manager as asr_manager
+    from src.providers.llm_service import generation_provider_manager, chat_provider_manager, document_provider_manager
 
-# Provider health monitoring endpoint
+    # Register managers for health monitoring
+    health_monitor.register_manager(asr_manager)
+    health_monitor.register_manager(generation_provider_manager)
+    health_monitor.register_manager(chat_provider_manager)
+    health_monitor.register_manager(document_provider_manager)
+
+    # Start the monitor task
+    import asyncio
+    asyncio.create_task(health_monitor.start())
+    
+    # Verify and Log All Registered Routes (User Requirement)
+    print("\n========= REGISTERED ROUTES =========")
+    for route in app.routes:
+        methods = getattr(route, "methods", {"GET"})
+        print(f"{list(methods)} {route.path}")
+    print("=====================================\n")
+
+    yield
+    print("Stopping Health Monitor...")
+    await health_monitor.stop()
+
+app.router.lifespan_context = lifespan
+
+# Robust mode detection
+mode = os.getenv("APP_MODE", "AUDIO").strip().upper()
+
+# Include routes
+# Authentication routes are SHARED and must always be present
+# Frontend expects /api/user prefix (singular)
+app.include_router(user_router, prefix="/api/user", tags=["Users"])
+
+if mode == "DOCS":
+    # Document Intelligence Workspace
+    # Frontend expects /api/documents prefix
+    app.include_router(document_notes_router, prefix="/api/documents", tags=["Document Notes"])
+else:
+    # Audio Intelligence Workspace (Default)
+    # Frontend expects /api/chat prefix
+    app.include_router(chat_router, prefix="/api/chat", tags=["Audio Chat"])
+
+@app.get("/api/health")
+def health_check():
+    mode = os.getenv("APP_MODE", "AUDIO").strip().upper()
+    return {
+        "status": "healthy",
+        "mode": mode,
+        "memory_usage_mb": psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024,
+        "cpu_usage_percent": psutil.cpu_percent()
+    }
+
 @app.get("/api/providers/status")
 async def provider_status():
-    """Returns real-time health of all provider pools."""
     from src.providers.provider_manager import provider_manager as asr_mgr
-    from src.providers.llm_service import generation_provider_manager, chat_provider_manager
+    from src.providers.llm_service import generation_provider_manager, chat_provider_manager, document_provider_manager
     return {
         "asr": asr_mgr.get_status_report(),
         "generation": generation_provider_manager.get_status_report(),
         "chat": chat_provider_manager.get_status_report(),
+        "document": document_provider_manager.get_status_report(),
     }
 
 # Serve the frontend files statically
