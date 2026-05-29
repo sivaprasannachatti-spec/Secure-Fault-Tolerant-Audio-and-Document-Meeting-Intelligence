@@ -3,8 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meeting AI Assistant</title>
+    <title>MeetingAI — Enterprise Meeting Intelligence Platform</title>
+    <meta name="description" content="Securely decode corporate meetings and notes into structured action items and decisions using Vectorless RAG and local, isolated LLM orchestration.">
+    <meta name="keywords" content="meeting intelligence, audio transcription, speaker diarization, group-based access control, vectorless RAG, LangGraph, enterprise privacy">
     <link rel="stylesheet" href="./css/style.css">
+</head>
+<body class="cinematic-bg">
+    <!-- Ambient particle background -->
+    <canvas id="ambient-canvas" class="ambient-canvas"></canvas>
+
+    <!-- SVG Defs for Gradients -->
+    <svg style="width:0;height:0;position:absolute;" aria-hidden="true" focusable="false">
+      <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#6366f1" />
+        <stop offset="50%" stop-color="#a855f7" />
+        <stop offset="100%" stop-color="#ec4899" />
+      </linearGradient>
+    </svg>
+
     <nav class="navbar">
         <a href="index.html" class="logo">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -15,66 +31,336 @@
             MeetingAI
         </a>
         <div class="nav-links">
+            <a href="#workflow">Workflow</a>
             <a href="#features">Capabilities</a>
-            <a href="#">Security</a>
+            <a href="#specs">Specs</a>
+            <a href="#impact">Impact</a>
             <a href="javascript:void(0)" onclick="handleWorkspaceSelection('audio')" class="btn-outline">Workspace</a>
             <a href="javascript:void(0)" onclick="handleWorkspaceSelection('audio')" class="btn-primary">Get Started</a>
         </div>
     </nav>
 
-    <main class="hero">
+    <!-- Cinematic Hero Section -->
+    <main class="hero cinematic-hero">
         <div class="hero-content">
-            <div class="hero-badge">
-                <span></span> Meeting Analysis Platform
+            <div class="hero-left">
+                <div class="hero-badge animate-fade-in">
+                    <span class="pulse-dot"></span> Next-Gen Meeting Intelligence
+                </div>
+                <h1 class="hero-title animate-title">Meetings decoded.<br><span class="glow-text">Knowledge secured.</span></h1>
+                <p class="hero-subtitle animate-fade-in-delayed">Upload corporate audio or meeting notes and experience instantaneous intelligence. Extract action items, isolate department logic, and query history entirely locally.</p>
+                <div class="hero-cta animate-fade-in-delayed">
+                    <button onclick="handleWorkspaceSelection('audio')" class="btn-primary" id="btn-audio-workspace">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="22"></line>
+                        </svg>
+                        Get Summary by Audio
+                    </button>
+                    <button onclick="handleWorkspaceSelection('notes')" class="btn-primary btn-notes" id="btn-notes-workspace">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                        </svg>
+                        Get Summary by Notes
+                    </button>
+                </div>
+                <div class="hero-cta-alt animate-fade-in-delayed">
+                    <a href="#workflow" class="learn-more-link">
+                        See how it works
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                    </a>
+                </div>
             </div>
-            <h1 class="hero-title">Meetings decoded. Knowledge secured.</h1>
-            <p class="hero-subtitle">Upload your corporate audio and experience instantaneous intelligence. Extract action items, isolate department logic, and query your history entirely locally.</p>
-            <div class="hero-cta">
-                <button onclick="handleWorkspaceSelection('audio')" class="btn-primary" id="btn-audio-workspace">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                        <line x1="12" y1="19" x2="12" y2="22"></line>
-                    </svg>
-                    Get Summary by Audio
-                </button>
-                <button onclick="handleWorkspaceSelection('notes')" class="btn-primary btn-notes" id="btn-notes-workspace">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                        <polyline points="14 2 14 8 20 8"></polyline>
-                        <line x1="16" y1="13" x2="8" y2="13"></line>
-                        <line x1="16" y1="17" x2="8" y2="17"></line>
-                    </svg>
-                    Get Summary by Meeting Notes
-                </button>
-            </div>
-            <div class="hero-cta" style="margin-top: 0.8rem;">
-                <a href="#features" class="btn-outline">Explore Capabilities</a>
+            
+            <div class="hero-right animate-float-in">
+                <!-- Interactive AI Sandbox Preview -->
+                <div class="preview-dashboard glass-card">
+                    <div class="dashboard-header">
+                        <div class="dashboard-dots">
+                            <span class="dot red"></span>
+                            <span class="dot yellow"></span>
+                            <span class="dot green"></span>
+                        </div>
+                        <div class="dashboard-title">MeetingAI Live Sandbox</div>
+                        <div class="dashboard-status-badge">
+                            <span class="status-indicator-dot processing"></span> Analyzing Audio
+                        </div>
+                    </div>
+                    <div class="dashboard-body">
+                        <!-- Simulated Audio wave -->
+                        <div class="audio-wave-container">
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                            <div class="wave-bar"></div>
+                        </div>
+                        
+                        <!-- Simulated Transcript -->
+                        <div class="transcript-sim-container">
+                            <div class="transcript-sim-message" id="ts-1">
+                                <span class="speaker-tag orange">SPEAKER_00</span>
+                                <span class="typing-text">Let's coordinate on Q3 database migration timeline.</span>
+                            </div>
+                            <div class="transcript-sim-message" id="ts-2">
+                                <span class="speaker-tag purple">SPEAKER_01</span>
+                                <span class="typing-text">I'll spin up the Postgres replica. John, fix the API.</span>
+                            </div>
+                            <div class="transcript-sim-message" id="ts-3">
+                                <span class="speaker-tag gold">AI SYSTEM</span>
+                                <span class="typing-text-ai">✓ Action Item Extracted: Fix the API | Assignee: John | Deadline: Friday</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dashboard-footer-status">
+                        <span>Confidence: 99.7%</span>
+                        <span style="color:#34d399; font-weight:600;"><span class="pulse-dot" style="background:#34d399; box-shadow: 0 0 8px #34d399; width:6px; height:6px; margin-right:4px;"></span> GBAC Gating: Active</span>
+                        <span>Diarization: Active</span>
+                    </div>
+                </div>
             </div>
         </div>
     </main>
 
-    <script>
-        function handleWorkspaceSelection(mode) {
-            const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
-            if (isAuthenticated) {
-                // Directly enter workspace if already logged in
-                window.location.href = `./html/chat.html?mode=${mode}`;
-            } else {
-                // Redirect to login while preserving the intended workspace mode
-                window.location.href = `./html/login.html?mode=${mode}`;
-            }
-        }
-    </script>
+    <!-- WorkFlow Section (Pipeline Flowchart) -->
+    <section id="workflow" class="workflow-section reveal-on-scroll">
+        <div class="section-container">
+            <div class="section-header">
+                <span class="section-tag">AI PIPELINE</span>
+                <h2>Cognitive Workflow</h2>
+                <p>Follow the instant lifecycle of a meeting recording converted to enterprise intelligence.</p>
+            </div>
+            
+            <div class="workflow-steps-container reveal-sequence-horizontal">
+                <!-- Step 1 -->
+                <div class="workflow-step-card glass-card floating-wave-item float-phase-1 reveal-delay-1">
+                    <div class="step-badge">01</div>
+                    <div class="step-icon">📤</div>
+                    <h3>Upload</h3>
+                    <p>Drop multi-speaker corporate recordings or offline notes files seamlessly.</p>
+                </div>
+                
+                <!-- Connector 1 -->
+                <div class="workflow-connector reveal-delay-2">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
 
-    <section id="features" class="features-container">
+                <!-- Step 2 -->
+                <div class="workflow-step-card glass-card floating-wave-item float-phase-2 reveal-delay-3">
+                    <div class="step-badge">02</div>
+                    <div class="step-icon">🧠</div>
+                    <h3>AI Processing</h3>
+                    <p>Diarizes voice components and resolves segments with LangGraph pipelines.</p>
+                </div>
+                
+                <!-- Connector 2 -->
+                <div class="workflow-connector reveal-delay-4">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="workflow-step-card glass-card floating-wave-item float-phase-3 reveal-delay-5">
+                    <div class="step-badge">03</div>
+                    <div class="step-icon">📝</div>
+                    <h3>Transcription</h3>
+                    <p>Converts speech to indexed text aligned precisely to Speaker IDs.</p>
+                </div>
+
+                <!-- Connector 3 -->
+                <div class="workflow-connector reveal-delay-6">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+
+                <!-- Step 4 -->
+                <div class="workflow-step-card glass-card floating-wave-item float-phase-4 reveal-delay-7">
+                    <div class="step-badge">04</div>
+                    <div class="step-icon">💎</div>
+                    <h3>Intelligence</h3>
+                    <p>Automatically isolates key items, deadlines, and consensus paths.</p>
+                </div>
+
+                <!-- Connector 4 -->
+                <div class="workflow-connector reveal-delay-8">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </div>
+
+                <!-- Step 5 -->
+                <div class="workflow-step-card glass-card floating-wave-item float-phase-5 reveal-delay-9">
+                    <div class="step-badge">05</div>
+                    <div class="step-icon">💬</div>
+                    <h3>Summaries &amp; Q&amp;A</h3>
+                    <p>Review the formatted final cards and query the history in real time.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Technical Intelligence section (Accordion + Pipeline simulator) -->
+    <section id="specs" class="tech-specs-section reveal-on-scroll">
+        <div class="section-container">
+            <div class="section-header">
+                <span class="section-tag">Specifications</span>
+                <h2>Technical Intelligence</h2>
+                <p>Enterprise-grade AI pipeline engineered for high speed, deterministic formatting, and absolute data privacy.</p>
+            </div>
+            
+            <div class="tech-specs-content">
+                <div class="tech-tabs">
+                    <div class="tech-tab-item active" onclick="selectTechTab(0)">
+                        <div class="tech-tab-header">
+                            <div class="tech-tab-title">
+                                <span class="tech-tab-icon">🔒</span>
+                                Group-Based Access Control (GBAC)
+                            </div>
+                            <span class="tech-tab-chevron">❯</span>
+                        </div>
+                        <div class="tech-tab-content">
+                            Mathematically isolated workspaces. Secure routing tokens restrict LLM vector retrieval strictly to designated enterprise groups (e.g., HR, Engineering, Executive). Executive discussions are kept hidden from unauthorized accounts.
+                        </div>
+                    </div>
+                    
+                    <div class="tech-tab-item" onclick="selectTechTab(1)">
+                        <div class="tech-tab-header">
+                            <div class="tech-tab-title">
+                                <span class="tech-tab-icon">⚡</span>
+                                Vectorless Context Mapping (RAG)
+                            </div>
+                            <span class="tech-tab-chevron">❯</span>
+                        </div>
+                        <div class="tech-tab-content">
+                            Custom semantic indexing context architecture maps transcript files directly to the synthesis engines. Bypasses traditional database vector distance drifts, achieving 100% search accuracy with zero hallucination.
+                        </div>
+                    </div>
+                    
+                    <div class="tech-tab-item" onclick="selectTechTab(2)">
+                        <div class="tech-tab-header">
+                            <div class="tech-tab-title">
+                                <span class="tech-tab-icon">🤖</span>
+                                LangGraph Orchestration &amp; Memory
+                            </div>
+                            <span class="tech-tab-chevron">❯</span>
+                        </div>
+                        <div class="tech-tab-content">
+                            Multi-agent routing state machines manage document ingest, audio segmentation, summary generation, and interactive Q&A. Stateful memory stores past user inputs to provide context-aware chat streaming responses.
+                        </div>
+                    </div>
+                    
+                    <div class="tech-tab-item" onclick="selectTechTab(3)">
+                        <div class="tech-tab-header">
+                            <div class="tech-tab-title">
+                                <span class="tech-tab-icon">🎙️</span>
+                                Diarized Speech Transcription
+                            </div>
+                            <span class="tech-tab-chevron">❯</span>
+                        </div>
+                        <div class="tech-tab-content">
+                            Processes raw WAV/MP3 files using local Deepgram transcription modules. Automatically separates voice prints into Speaker IDs, timestamping segments precisely for semantic queries.
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="pipeline-simulator">
+                    <!-- Simulator Node 1 -->
+                    <div class="sim-node active" id="sim-node-1">
+                        <div class="sim-node-name">
+                            <span>🎙️</span> Diarized Speech Transcription
+                        </div>
+                        <div class="sim-node-status" id="sim-status-1">PROCESSING</div>
+                        <div class="sim-pulse-line"></div>
+                    </div>
+                    <div class="sim-connection active" id="sim-conn-1"></div>
+                    
+                    <!-- Simulator Node 2 -->
+                    <div class="sim-node" id="sim-node-2">
+                        <div class="sim-node-name">
+                            <span>🔒</span> GBAC Privacy Gating
+                        </div>
+                        <div class="sim-node-status" id="sim-status-2">PENDING</div>
+                        <div class="sim-pulse-line"></div>
+                    </div>
+                    <div class="sim-connection" id="sim-conn-2"></div>
+                    
+                    <!-- Simulator Node 3 -->
+                    <div class="sim-node" id="sim-node-3">
+                        <div class="sim-node-name">
+                            <span>⚡</span> Vectorless Context Mapping
+                        </div>
+                        <div class="sim-node-status" id="sim-status-3">PENDING</div>
+                        <div class="sim-pulse-line"></div>
+                    </div>
+                    <div class="sim-connection" id="sim-conn-3"></div>
+                    
+                    <!-- Simulator Node 4 -->
+                    <div class="sim-node" id="sim-node-4">
+                        <div class="sim-node-name">
+                            <span>🤖</span> LangGraph Synthesizer
+                        </div>
+                        <div class="sim-node-status" id="sim-status-4">PENDING</div>
+                        <div class="sim-pulse-line"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Visual Architecture Section -->
+    <section id="architecture" class="arch-showcase-section reveal-on-scroll">
+        <div class="section-container">
+            <div class="section-header">
+                <span class="section-tag">Infrastructure</span>
+                <h2>Data Flow Architecture</h2>
+                <p>An inside look at how raw files map securely into real-time collaborative assets.</p>
+            </div>
+            <div class="arch-container">
+                <div class="arch-flow reveal-sequence-horizontal">
+                    <div class="arch-box floating-wave-item float-phase-1 reveal-delay-1">
+                        <h4>Meeting Upload</h4>
+                        <p>Audio recording or notes text file uploaded locally.</p>
+                    </div>
+                    <div class="arch-arrow reveal-delay-2"></div>
+                    <div class="arch-box floating-wave-item float-phase-2 reveal-delay-3">
+                        <h4>Diarization</h4>
+                        <p>Voice signatures mapped to corporate profiles.</p>
+                    </div>
+                    <div class="arch-arrow reveal-delay-4"></div>
+                    <div class="arch-box floating-wave-item float-phase-3 reveal-delay-5">
+                        <h4>GBAC Gating</h4>
+                        <p>Verification engine isolates department data.</p>
+                    </div>
+                    <div class="arch-arrow reveal-delay-6"></div>
+                    <div class="arch-box floating-wave-item float-phase-4 reveal-delay-7">
+                        <h4>Vectorless Index</h4>
+                        <p>Structured context retrieved without database drift.</p>
+                    </div>
+                    <div class="arch-arrow reveal-delay-8"></div>
+                    <div class="arch-box floating-wave-item float-phase-5 reveal-delay-9">
+                        <h4>Synthesis Node</h4>
+                        <p>LangGraph agent delivers markdown Q&amp;A stream.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Capabilities/Features Grid -->
+    <section id="features" class="features-container reveal-on-scroll">
         <div class="features-header">
+            <span class="section-tag">CAPABILITIES</span>
             <h2>Built for enterprise speed.</h2>
             <p>Everything you need to stop watching recordings and start executing.</p>
         </div>
-        <div class="features">
+        <div class="features reveal-sequence-horizontal">
             <!-- Box 1 -->
-            <div class="feature-card">
+            <div class="feature-card glass-card floating-wave-item float-phase-1 reveal-delay-1">
                 <div class="feature-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
@@ -88,7 +374,7 @@
             </div>
             
             <!-- Box 2 -->
-            <div class="feature-card">
+            <div class="feature-card glass-card floating-wave-item float-phase-2 reveal-delay-2">
                 <div class="feature-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
@@ -100,7 +386,7 @@
             </div>
             
             <!-- Box 3 -->
-            <div class="feature-card">
+            <div class="feature-card glass-card floating-wave-item float-phase-3 reveal-delay-3">
                 <div class="feature-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
@@ -114,7 +400,7 @@
             </div>
 
             <!-- Box 4 -->
-            <div class="feature-card">
+            <div class="feature-card glass-card floating-wave-item float-phase-4 reveal-delay-4">
                 <div class="feature-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="9 11 12 14 22 4"></polyline>
@@ -126,7 +412,7 @@
             </div>
 
             <!-- Box 5 -->
-            <div class="feature-card">
+            <div class="feature-card glass-card floating-wave-item float-phase-5 reveal-delay-5">
                 <div class="feature-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -137,14 +423,13 @@
             </div>
 
             <!-- Box 6 -->
-            <div class="feature-card">
+            <div class="feature-card glass-card floating-wave-item float-phase-6 reveal-delay-6">
                 <div class="feature-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                         <polyline points="14 2 14 8 20 8"></polyline>
                         <line x1="16" y1="13" x2="8" y2="13"></line>
                         <line x1="16" y1="17" x2="8" y2="17"></line>
-                        <polyline points="10 9 9 9 8 9"></polyline>
                     </svg>
                 </div>
                 <h3 class="feature-title">Automated Summaries</h3>
@@ -152,5 +437,329 @@
             </div>
         </div>
     </section>
+
+    <!-- Enterprise Value Impact Section -->
+    <section id="impact" class="benefits-section reveal-on-scroll">
+        <div class="section-container">
+            <div class="section-header">
+                <span class="section-tag">Value Impact</span>
+                <h2>Quantifiable Benefits</h2>
+                <p>Scale operational efficiency and ensure perfect task memory with zero manual cataloging.</p>
+            </div>
+            <div class="benefits-grid reveal-sequence-horizontal">
+                <div class="benefit-card floating-wave-item float-phase-1 reveal-delay-1">
+                    <div class="benefit-stat">60%</div>
+                    <h3>Reduction in Meeting Overhead</h3>
+                    <p>Instantly catch up on missed sessions in under 2 minutes. Unified executive summaries allow team members to review key outcomes without sitting through video loops.</p>
+                </div>
+                <div class="benefit-card floating-wave-item float-phase-2 reveal-delay-2">
+                    <h3>Zero Commitment Drift</h3>
+                    <div class="benefit-stat">0%</div>
+                    <p>Every decision, timeline, and assignment is isolated dynamically. Real-time extraction pushes metrics straight to department logs, ensuring zero items are lost.</p>
+                </div>
+                <div class="benefit-card floating-wave-item float-phase-3 reveal-delay-3">
+                    <div class="benefit-stat">100%</div>
+                    <h3>Institutional Memory Recall</h3>
+                    <p>Keep institutional knowledge alive. New hires, departments, and project coordinators can query historical meeting outputs and documents instantly via secure chat.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Cinematic Footer CTA Section -->
+    <section class="cta-footer-section reveal-on-scroll">
+        <div class="cta-footer-card">
+            <div class="cta-footer-badge">On-Premise Deployment Enabled</div>
+            <h2>Unlock organizational intelligence.</h2>
+            <p>Deploy MeetingAI within your existing cloud boundary. 100% local transcription processing, secure vectorless index caching, and strict data confidentiality guarantees.</p>
+            <div class="cta-footer-buttons">
+                <button onclick="handleWorkspaceSelection('audio')" class="btn-primary">
+                    Open Audio Workspace
+                </button>
+                <button onclick="handleWorkspaceSelection('notes')" class="btn-primary btn-notes">
+                    Open Notes Workspace
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Canvas Animation & Scroll reveals & interactive especs scripts -->
+    <script>
+        // Redirect logic to Workspace Mode
+        function handleWorkspaceSelection(mode) {
+            const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
+            if (isAuthenticated) {
+                window.location.href = `./html/chat.html?mode=${mode}`;
+            } else {
+                window.location.href = `./html/login.html?mode=${mode}`;
+            }
+        }
+
+        // 1. Continuous Slow-Falling Ambient Particles (Snow-Like Parallax Drift)
+        const canvas = document.getElementById('ambient-canvas');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            let particles = [];
+
+            function resize() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+            window.addEventListener('resize', resize);
+            resize();
+
+            class FallingParticle {
+                constructor() {
+                    this.reset(true);
+                }
+
+                reset(initial = false) {
+                    this.x = Math.random() * canvas.width;
+                    this.y = initial ? Math.random() * canvas.height : -10;
+                    this.size = Math.random() * 1.6 + 0.4;
+                    // Slow downward drift
+                    this.speedY = Math.random() * 0.35 + 0.15;
+                    // Small base sway
+                    this.speedX = Math.random() * 0.1 - 0.05;
+                    this.opacity = Math.random() * 0.3 + 0.08;
+                    // Oscillating wind factor
+                    this.angle = Math.random() * Math.PI * 2;
+                    this.speedAngle = Math.random() * 0.015 + 0.003;
+                    
+                    // Harmonies of Brand Colors: Purple, Gold, and Soft White
+                    const rand = Math.random();
+                    if (rand < 0.45) {
+                        this.color = `rgba(168, 85, 247, ${this.opacity})`; // Purple
+                    } else if (rand < 0.7) {
+                        this.color = `rgba(212, 175, 55, ${this.opacity + 0.05})`; // Gold
+                    } else {
+                        this.color = `rgba(248, 250, 252, ${this.opacity})`; // Off-white
+                    }
+                }
+
+                update() {
+                    this.y += this.speedY;
+                    this.angle += this.speedAngle;
+                    // Apply a gentle sway
+                    this.x += Math.sin(this.angle) * 0.22 + this.speedX;
+
+                    // Reset if particle moves out of viewport bounds
+                    if (this.y > canvas.height) {
+                        this.reset(false);
+                    }
+                    if (this.x < 0) {
+                        this.x = canvas.width;
+                    } else if (this.x > canvas.width) {
+                        this.x = 0;
+                    }
+                }
+
+                draw() {
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // Create particle set (balanced for performance/aesthetic density)
+            const particleCount = 75;
+            for (let i = 0; i < particleCount; i++) {
+                particles.push(new FallingParticle());
+            }
+
+            function animate() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                particles.forEach(p => {
+                    p.update();
+                    p.draw();
+                });
+                requestAnimationFrame(animate);
+            }
+            animate();
+        }
+
+        // 2. Interactive Technical specs accordion tabs
+        function selectTechTab(index) {
+            const tabs = document.querySelectorAll('.tech-tab-item');
+            tabs.forEach((tab, i) => {
+                if (i === index) {
+                    tab.classList.add('active');
+                } else {
+                    tab.classList.remove('active');
+                }
+            });
+
+            // Sync pipeline simulator step
+            activatePipelineStep(index + 1);
+        }
+
+        // 3. Automated Pipeline Simulator node sequencer
+        let activeStep = 1;
+        let pipelineInterval;
+
+        function activatePipelineStep(stepNum) {
+            // Update node elements active states
+            for (let i = 1; i <= 4; i++) {
+                const node = document.getElementById(`sim-node-${i}`);
+                const status = document.getElementById(`sim-status-${i}`);
+                const conn = document.getElementById(`sim-conn-${i}`);
+
+                if (i < stepNum) {
+                    node.classList.remove('active');
+                    node.style.borderColor = 'rgba(52, 211, 153, 0.4)'; // green border
+                    node.style.background = 'rgba(52, 211, 153, 0.03)';
+                    status.textContent = 'COMPLETED';
+                    status.style.color = '#34d399';
+                    if (conn) conn.classList.add('active');
+                } else if (i === stepNum) {
+                    node.classList.add('active');
+                    node.style.borderColor = ''; // reset to default active style
+                    node.style.background = '';
+                    status.textContent = 'PROCESSING';
+                    status.style.color = '';
+                    if (conn) conn.classList.remove('active');
+                } else {
+                    node.classList.remove('active');
+                    node.style.borderColor = '';
+                    node.style.background = '';
+                    status.textContent = 'PENDING';
+                    status.style.color = '';
+                    if (conn) conn.classList.remove('active');
+                }
+            }
+            activeStep = stepNum;
+        }
+
+        function startPipelineSimulation() {
+            pipelineInterval = setInterval(() => {
+                let nextStep = activeStep + 1;
+                if (nextStep > 4) nextStep = 1;
+                
+                // Auto toggle corresponding spec tab item as well
+                const tabs = document.querySelectorAll('.tech-tab-item');
+                if (tabs[nextStep - 1]) {
+                    tabs.forEach((tab, i) => {
+                        if (i === nextStep - 1) {
+                            tab.classList.add('active');
+                        } else {
+                            tab.classList.remove('active');
+                        }
+                    });
+                }
+                
+                activatePipelineStep(nextStep);
+            }, 4500);
+        }
+
+        // Pause auto-simulation if user clicks on a spec tab manually
+        document.querySelectorAll('.tech-tab-item').forEach(tab => {
+            tab.addEventListener('click', () => {
+                clearInterval(pipelineInterval);
+            });
+        });
+
+        // 4. Scroll Storytelling reveals (using IntersectionObserver)
+        document.addEventListener('DOMContentLoaded', () => {
+            const revealElements = document.querySelectorAll('.reveal-on-scroll');
+            
+            const revealObserver = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('visible');
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, {
+                threshold: 0.1,
+                rootMargin: '0px 0px -40px 0px'
+            });
+
+            revealElements.forEach(el => revealObserver.observe(el));
+            
+            // Start spec pipeline auto simulation
+            startPipelineSimulation();
+        });
+
+        // 5. Simulated live speech transcript typing sequence in hero workspace preview
+        document.addEventListener('DOMContentLoaded', () => {
+            const steps = [
+                { id: 'ts-1', delay: 1000 },
+                { id: 'ts-2', delay: 4500 },
+                { id: 'ts-3', delay: 8500 }
+            ];
+
+            function runSequence() {
+                steps.forEach(s => {
+                    const el = document.getElementById(s.id);
+                    if (el) el.classList.remove('active');
+                });
+
+                steps.forEach(s => {
+                    setTimeout(() => {
+                        const el = document.getElementById(s.id);
+                        if (el) el.classList.add('active');
+                    }, s.delay);
+                });
+            }
+
+            runSequence();
+            setInterval(runSequence, 13000);
+        });
+
+        // 6. Traveling Active Glow loops across card sequences
+        document.addEventListener('DOMContentLoaded', () => {
+            // Cognitive Workflow Cards
+            let workflowGlowIndex = 0;
+            function updateWorkflowGlow() {
+                const cards = document.querySelectorAll('.workflow-steps-container .workflow-step-card');
+                if (cards.length === 0) return;
+                cards.forEach((card, idx) => {
+                    if (idx === workflowGlowIndex) {
+                        card.classList.add('active-glow-gold');
+                    } else {
+                        card.classList.remove('active-glow-gold');
+                    }
+                });
+                workflowGlowIndex = (workflowGlowIndex + 1) % cards.length;
+            }
+            setInterval(updateWorkflowGlow, 3500);
+            setTimeout(updateWorkflowGlow, 500); 
+
+            // Data Flow Architecture Boxes
+            let archGlowIndex = 0;
+            function updateArchGlow() {
+                const boxes = document.querySelectorAll('.arch-flow .arch-box');
+                if (boxes.length === 0) return;
+                boxes.forEach((box, idx) => {
+                    if (idx === archGlowIndex) {
+                        box.classList.add('active-glow');
+                    } else {
+                        box.classList.remove('active-glow');
+                    }
+                });
+                archGlowIndex = (archGlowIndex + 1) % boxes.length;
+            }
+            setInterval(updateArchGlow, 3500);
+            setTimeout(updateArchGlow, 1500); 
+
+            // Capabilities Feature Cards
+            let featuresGlowIndex = 0;
+            function updateFeaturesGlow() {
+                const cards = document.querySelectorAll('.features .feature-card');
+                if (cards.length === 0) return;
+                cards.forEach((card, idx) => {
+                    if (idx === featuresGlowIndex) {
+                        card.classList.add('active-glow');
+                    } else {
+                        card.classList.remove('active-glow');
+                    }
+                });
+                featuresGlowIndex = (featuresGlowIndex + 1) % cards.length;
+            }
+            setInterval(updateFeaturesGlow, 3000);
+            setTimeout(updateFeaturesGlow, 2000); 
+        });
+    </script>
 </body>
 </html>

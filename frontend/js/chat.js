@@ -14,6 +14,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     let currentMeetingId = null;
     let currentUploadMode = 'audio'; // Tracks modal state: 'audio' or 'document'
     let currentMeetingType = 'audio'; // Tracks the type of the currently viewed meeting
+    
+    // Performance Pagination state variables (Phase 1, Item 3)
+    let hasMoreMessages = true;
+    let isLoadingMore = false;
+    let oldestMessageId = null;
+    let isInitialLoading = false;
+    const PAGE_LIMIT = 25;
 
     // ======================================================================
     // WORKSPACE ISOLATION LOGIC (Spec §A, §B)
@@ -72,6 +79,92 @@ document.addEventListener('DOMContentLoaded', async () => {
             toast.style.animation = 'toastSlideOut 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards';
             setTimeout(() => toast.remove(), 400);
         }, 4000);
+    }
+
+    // ----------------------------------------------------------------------
+    // Markdown Rendering & Sanitization (Phase 1 & 2)
+    // ----------------------------------------------------------------------
+    function safeRenderMarkdown(text) {
+        if (!text) return "";
+        let html = "";
+        
+        if (window.marked) {
+            // Configure marked for line breaks
+            marked.setOptions({
+                breaks: true,
+                gfm: true
+            });
+            html = window.marked.parse(text);
+        } else {
+            // Fallback Regex Parser for 100% Offline Mode
+            html = text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+            
+            // Fenced Code Blocks (Basic multiline parsing)
+            html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+                return `<pre><code class="language-${lang}">${code.trim()}</code></pre>`;
+            });
+            
+            // Blockquotes
+            html = html.replace(/^\s*>\s+(.*$)/gim, '<blockquote>$1</blockquote>');
+            html = html.replace(/<\/blockquote>\s*<blockquote>/g, '<br>');
+            
+            // Headings
+            html = html.replace(/^###\s+(.*$)/gim, '<h3>$1</h3>');
+            html = html.replace(/^##\s+(.*$)/gim, '<h2>$1</h2>');
+            html = html.replace(/^#\s+(.*$)/gim, '<h1>$1</h1>');
+            
+            // Bold
+            html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            // Italic
+            html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+            // Inline Code
+            html = html.replace(/`(.*?)`/g, '<code>$1</code>');
+            
+            // Unordered Lists
+            html = html.replace(/^\s*[-*]\s+(.*$)/gim, '<ul><li>$1</li></ul>');
+            html = html.replace(/<\/ul>\s*<ul>/g, '\n');
+            
+            // Ordered Lists
+            html = html.replace(/^\s*\d+\.\s+(.*$)/gim, '<ol><li>$1</li></ol>');
+            html = html.replace(/<\/ol>\s*<ol>/g, '\n');
+            
+            // Paragraphs and double-newlines split
+            const parts = html.split(/\n\n+/);
+            html = parts.map(part => {
+                const trimmed = part.trim();
+                if (trimmed.startsWith('<h') || 
+                    trimmed.startsWith('<ul') || 
+                    trimmed.startsWith('<ol') || 
+                    trimmed.startsWith('<pre') || 
+                    trimmed.startsWith('<blockquote')) {
+                    return part;
+                }
+                return `<p>${part.replace(/\n/g, '<br>')}</p>`;
+            }).join('\n');
+        }
+        
+        // Sanitize parsed HTML to prevent XSS
+        if (window.DOMPurify) {
+            return window.DOMPurify.sanitize(html, {
+                ALLOWED_TAGS: [
+                    'p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 
+                    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'blockquote', 'a'
+                ],
+                ALLOWED_ATTR: ['href', 'title', 'target', 'class']
+            });
+        } else {
+            // Offline security sanitize fallback
+            return html
+                .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+                .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '')
+                .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
+                .replace(/href\s*=\s*["']\s*javascript:/gi, 'href="#"')
+                .replace(/on\w+\s*=/gi, 'data-removed=');
+        }
     }
 
     // --- Persistence & Recovery Logic ---
@@ -289,64 +382,99 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // 4. Load Chat History
-    // 4. Load Chat History (Personal)
+    // Helper to render chat history list in DOM (Phase 2, Item 7)
+    function renderChatHistoryUI(chats) {
+        const chatHistoryList = document.getElementById('chat-history-list');
+        chatHistoryList.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        chats.forEach(chat => {
+            const item = document.createElement('div');
+            item.className = 'history-item';
+            item.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                <span>${chat.chat_title}</span>
+            `;
+            item.addEventListener('click', () => {
+                localStorage.setItem('last_viewed_type', 'chat');
+                localStorage.setItem('last_viewed_chat_id', chat.chat_id);
+                localStorage.setItem('last_viewed_title', chat.chat_title);
+                localStorage.setItem('last_viewed_meeting_type', WORKSPACE_TYPE);
+                loadOldChat(chat.chat_id, chat.chat_title);
+            });
+            fragment.appendChild(item);
+        });
+        chatHistoryList.appendChild(fragment);
+    }
+
+    // 4. Load Chat History (Personal) - Optimized with Stale-While-Revalidate cache (Phase 4, Item 12)
     async function loadChatHistory() {
         try {
-            const chatHistoryList = document.getElementById('chat-history-list');
+            const cacheKey = `cache_chats_${WORKSPACE_TYPE}`;
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+                try {
+                    renderChatHistoryUI(JSON.parse(cached));
+                } catch (e) {
+                    console.error("Failed to parse cached chats:", e);
+                }
+            }
+
             const res = await fetch(`${WORKSPACE_API_PREFIX}/getChats`, { credentials: 'include' });
             if (!res.ok) return;
             const data = await res.json();
+            const chats = data.chats.reverse();
 
-            // Clear existing history
-            chatHistoryList.innerHTML = '';
-
-            data.chats.reverse().forEach(chat => {
-                const item = document.createElement('div');
-                item.className = 'history-item';
-                item.innerHTML = `
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                    <span>${chat.chat_title}</span>
-                `;
-                item.addEventListener('click', () => {
-                    localStorage.setItem('last_viewed_type', 'chat');
-                    localStorage.setItem('last_viewed_chat_id', chat.chat_id);
-                    localStorage.setItem('last_viewed_title', chat.chat_title);
-                    localStorage.setItem('last_viewed_meeting_type', WORKSPACE_TYPE);
-                    loadOldChat(chat.chat_id, chat.chat_title);
-                });
-                chatHistoryList.appendChild(item);
-            });
+            localStorage.setItem(cacheKey, JSON.stringify(chats));
+            renderChatHistoryUI(chats);
         } catch (err) {
             console.error("Failed to load chats:", err);
         }
     }
 
-    // 4b. Load Meeting History (Shared)
+    // Helper to render meetings list in DOM (Phase 2, Item 7)
+    function renderMeetingsUI(meetings) {
+        const meetingList = document.getElementById('meeting-list');
+        meetingList.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        meetings.forEach(meeting => {
+            const item = document.createElement('div');
+            item.className = 'history-item';
+            item.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path></svg>
+                <span>${meeting.meeting_title}</span>
+            `;
+            item.addEventListener('click', () => {
+                localStorage.setItem('last_viewed_type', 'meeting');
+                localStorage.setItem('last_viewed_meeting_id', meeting.meeting_id);
+                localStorage.setItem('last_viewed_title', meeting.meeting_title);
+                localStorage.setItem('last_viewed_meeting_type', WORKSPACE_TYPE);
+                loadMeetingOnly(meeting.meeting_id, meeting.meeting_title);
+            });
+            fragment.appendChild(item);
+        });
+        meetingList.appendChild(fragment);
+    }
+
+    // 4b. Load Meeting History (Shared) - Optimized with Stale-While-Revalidate cache (Phase 4, Item 12)
     async function loadAllMeetings() {
         try {
-            const meetingList = document.getElementById('meeting-list');
+            const cacheKey = `cache_meetings_${WORKSPACE_TYPE}`;
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+                try {
+                    renderMeetingsUI(JSON.parse(cached));
+                } catch (e) {
+                    console.error("Failed to parse cached meetings:", e);
+                }
+            }
+
             const res = await fetch(`${WORKSPACE_API_PREFIX}/getAllMeetings`, { credentials: 'include' });
             if (!res.ok) return;
             const data = await res.json();
+            const meetings = data.meetings.reverse();
 
-            meetingList.innerHTML = '';
-
-            data.meetings.reverse().forEach(meeting => {
-                const item = document.createElement('div');
-                item.className = 'history-item';
-                item.innerHTML = `
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path></svg>
-                    <span>${meeting.meeting_title}</span>
-                `;
-                item.addEventListener('click', () => {
-                    localStorage.setItem('last_viewed_type', 'meeting');
-                    localStorage.setItem('last_viewed_meeting_id', meeting.meeting_id);
-                    localStorage.setItem('last_viewed_title', meeting.meeting_title);
-                    localStorage.setItem('last_viewed_meeting_type', WORKSPACE_TYPE);
-                    loadMeetingOnly(meeting.meeting_id, meeting.meeting_title);
-                });
-                meetingList.appendChild(item);
-            });
+            localStorage.setItem(cacheKey, JSON.stringify(meetings));
+            renderMeetingsUI(meetings);
         } catch (err) {
             console.error("Failed to load meetings:", err);
         }
@@ -394,8 +522,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // 5. Load Specific Chat Messages
-    async function loadOldChat(chatId, title) {
+    // 5. Load Specific Chat Messages with progressive pagination cursor (Phase 1, Item 3 / Phase 2, Item 8)
+    async function loadOldChat(chatId, title, isLoadMore = false) {
         currentChatTitle = title;
         currentChatId = chatId;
 
@@ -405,69 +533,180 @@ document.addEventListener('DOMContentLoaded', async () => {
             else i.classList.remove('active');
         });
 
-        chatMessages.innerHTML = '';
+        if (!isLoadMore) {
+            isInitialLoading = true;
+            hasMoreMessages = true;
+            isLoadingMore = false;
+            oldestMessageId = null;
 
-        chatMessages.innerHTML = `
-            <div style="height: 100%; display: flex; align-items: center; justify-content: center;">
-                <div class="typing-indicator">
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                    <div class="typing-dot"></div>
-                </div>
-            </div>`;
+            chatMessages.innerHTML = `
+                <div class="skeleton-chat-loading" style="height: 100%; display: flex; align-items: center; justify-content: center;">
+                    <div class="typing-indicator">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>`;
+        } else {
+            isLoadingMore = true;
+            // Prepend a lightweight spinner/loading element at the top
+            let loadSpinner = document.getElementById('chat-history-load-spinner');
+            if (!loadSpinner) {
+                loadSpinner = document.createElement('div');
+                loadSpinner.id = 'chat-history-load-spinner';
+                loadSpinner.style = 'text-align: center; padding: 10px; color: var(--text-secondary); font-size: 0.85rem; font-weight: 500;';
+                loadSpinner.innerHTML = '⚡ Loading past messages...';
+                
+                const reportDiv = chatMessages.querySelector('.report-message');
+                if (reportDiv) {
+                    reportDiv.insertAdjacentElement('afterend', loadSpinner);
+                } else {
+                    chatMessages.prepend(loadSpinner);
+                }
+            }
+        }
 
         try {
-            const res = await fetch(`${WORKSPACE_API_PREFIX}/getOldChat/${chatId}`, { credentials: 'include' });
+            const url = isLoadMore 
+                ? `${WORKSPACE_API_PREFIX}/getOldChat/${chatId}?limit=${PAGE_LIMIT}&before_id=${oldestMessageId}`
+                : `${WORKSPACE_API_PREFIX}/getOldChat/${chatId}?limit=${PAGE_LIMIT}`;
+
+            const res = await fetch(url, { credentials: 'include' });
             if (!res.ok) throw new Error("Failed to fetch messages");
             const data = await res.json();
 
-            chatMessages.innerHTML = ''; // Clear indicator
+            // Store scroll positioning metrics before updating DOM if prepending items
+            const previousScrollHeight = chatMessages.scrollHeight;
+            const previousScrollTop = chatMessages.scrollTop;
 
-            // Render the Meeting Report at the top so user has context
-            if (data.final_report) {
-                const reportDiv = document.createElement('div');
-                reportDiv.className = 'message ai';
-                reportDiv.innerHTML = `
-                    <div class="avatar" style="background: var(--accent-gradient); color: white; font-size: 0.8rem; font-weight: bold;">AI</div>
-                    <div class="message-box" style="width: 100%; max-width: 680px;">
-                        ${renderMeetingReport(data.final_report)}
-                    </div>
-                    <div style="width: 100%; height: 1px; background: rgba(255, 255, 255, 0.05); margin: 20px 0;"></div>
-                `;
-                chatMessages.appendChild(reportDiv);
+            if (!isLoadMore) {
+                chatMessages.innerHTML = ''; // Clear indicator/skeleton
+                
+                // Render the Meeting Report at the top so user has context
+                if (data.final_report) {
+                    const reportDiv = document.createElement('div');
+                    reportDiv.className = 'message ai report-message';
+                    reportDiv.innerHTML = `
+                        <div class="avatar" style="background: var(--accent-gradient); color: white; font-size: 0.8rem; font-weight: bold;">AI</div>
+                        <div class="message-box" style="width: 100%; max-width: 680px;">
+                            ${renderMeetingReport(data.final_report)}
+                        </div>
+                        <div style="width: 100%; height: 1px; background: rgba(255, 255, 255, 0.05); margin: 20px 0;"></div>
+                    `;
+                    chatMessages.appendChild(reportDiv);
+                }
+            } else {
+                // Remove the loading spinner
+                const loadSpinner = document.getElementById('chat-history-load-spinner');
+                if (loadSpinner) loadSpinner.remove();
             }
 
+            const fragment = document.createDocumentFragment();
             data.chat.forEach(msg => {
-                renderMessage(msg.type.toLowerCase(), msg.message);
+                const msgDiv = createMessageElement(msg.type.toLowerCase(), msg.message, msg.message_id);
+                fragment.appendChild(msgDiv);
             });
+
+            if (data.chat.length > 0) {
+                // Capture the oldest message ID in the returned chunk for next fetch cursor
+                oldestMessageId = data.chat[0].message_id;
+            }
+
+            if (data.chat.length < PAGE_LIMIT) {
+                hasMoreMessages = false;
+            }
+
+            // Insert messages block into DOM
+            if (!isLoadMore) {
+                chatMessages.appendChild(fragment);
+                requestAnimationFrame(() => {
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                });
+            } else {
+                const reportDiv = chatMessages.querySelector('.report-message');
+                if (reportDiv) {
+                    reportDiv.after(fragment);
+                } else {
+                    chatMessages.prepend(fragment);
+                }
+                
+                // Keep the viewport scroll stable so user is not disoriented by prepended logs
+                requestAnimationFrame(() => {
+                    const newScrollHeight = chatMessages.scrollHeight;
+                    chatMessages.scrollTop = previousScrollTop + (newScrollHeight - previousScrollHeight);
+                });
+            }
+
             currentMeetingId = data.meeting_id;
             // Detect meeting type from backend response
             if (data.meeting_type === 'document') currentMeetingType = 'document';
             else currentMeetingType = 'audio';
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
         } catch (err) {
             console.error(err);
-            chatMessages.innerHTML = '<p style="text-align:center; color: #f87171; margin-top: 2rem;">Error loading messages.</p>';
+            if (!isLoadMore) {
+                chatMessages.innerHTML = '<p style="text-align:center; color: #f87171; margin-top: 2rem;">Error loading messages.</p>';
+            } else {
+                const loadSpinner = document.getElementById('chat-history-load-spinner');
+                if (loadSpinner) loadSpinner.innerHTML = '⚠️ Failed to load older messages.';
+            }
+        } finally {
+            isInitialLoading = false;
+            isLoadingMore = false;
         }
+    }
+
+    // Helpers to support progressive rendering and batch DocumentFragments (Phase 2, Item 9 / Phase 4, Item 15)
+    function escapeHtml(string) {
+        return String(string)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function createMessageElement(role, text, messageId = null) {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message ${role === 'ai' ? 'ai' : 'user'}`;
+        if (messageId) {
+            msgDiv.setAttribute('data-message-id', messageId);
+        }
+
+        const avatarColor = role === 'ai' ? 'var(--accent-gradient)' : 'rgba(255, 255, 255, 0.1)';
+        const initials = role === 'ai' ? 'AI' : document.getElementById('avatar-initials').innerText;
+
+        // Render message with temporary plain text preview to make DOM paint near-instant
+        msgDiv.innerHTML = `
+            <div class="avatar" style="background: ${avatarColor}; color: white; font-size: 0.8rem; font-weight: bold;">${initials}</div>
+            <div class="message-box">
+                <div class="message-content message-content-pending" style="white-space: pre-wrap; font-family: inherit;">${escapeHtml(text)}</div>
+            </div>
+        `;
+
+        // Progressive Markdown parsing in browser idle cycles
+        const scheduleHydration = window.requestIdleCallback || (cb => setTimeout(cb, 15));
+        scheduleHydration(() => {
+            const contentDiv = msgDiv.querySelector('.message-content');
+            if (contentDiv) {
+                contentDiv.innerHTML = safeRenderMarkdown(text);
+                contentDiv.classList.remove('message-content-pending');
+                contentDiv.style.whiteSpace = '';
+                contentDiv.style.fontFamily = '';
+            }
+        });
+
+        return msgDiv;
     }
 
     // 6. Helper to render messages
     function renderMessage(role, text) {
         const chatMessages = document.getElementById('chat-messages');
-        const msgDiv = document.createElement('div');
-        msgDiv.className = `message ${role === 'ai' ? 'ai' : 'user'}`;
-
-        const avatarColor = role === 'ai' ? 'var(--accent-gradient)' : 'rgba(255, 255, 255, 0.1)';
-        const initials = role === 'ai' ? 'AI' : document.getElementById('avatar-initials').innerText;
-
-        msgDiv.innerHTML = `
-            <div class="avatar" style="background: ${avatarColor}; color: white; font-size: 0.8rem; font-weight: bold;">${initials}</div>
-            <div class="message-box">
-                <div class="message-content">${text}</div>
-            </div>
-        `;
+        const msgDiv = createMessageElement(role, text);
         chatMessages.appendChild(msgDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        requestAnimationFrame(() => {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
     }
 
     // 6b. Render structured meeting report as premium cards
@@ -523,7 +762,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         <div class="report-section-title">Summary</div>
                     </div>
                     <div class="report-section-body">
-                        <div class="report-summary-text">${report.summary || 'No summary available.'}</div>
+                        <div class="report-summary-text">${safeRenderMarkdown(report.summary || 'No summary available.')}</div>
                     </div>
                 </div>
 
@@ -630,9 +869,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // Handle initial state and recovery
-    await loadChatHistory();
-    await loadAllMeetings();
+    // Handle initial state and recovery in parallel (Phase 2, Item 5)
+    const listsPromise = Promise.all([
+        loadChatHistory(),
+        loadAllMeetings()
+    ]);
     recoverPendingUpload();
 
     // Restore last viewed item ONLY if it matches the current workspace (Spec §A, §B)
@@ -656,6 +897,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         localStorage.removeItem('last_viewed_chat_id');
         localStorage.removeItem('last_viewed_meeting_type');
     }
+
+    await listsPromise;
+
+    // Attach Scroll Observer on chatMessages to trigger progressive cursor pagination (Phase 3, Item 10 / Phase 4, Item 14)
+    chatMessages.addEventListener('scroll', () => {
+        if (chatMessages.scrollTop < 30 && hasMoreMessages && !isLoadingMore && !isInitialLoading && currentChatId) {
+            loadOldChat(currentChatId, currentChatTitle, true);
+        }
+    });
 
     // 7. Send Message Handler
     async function sendMessage() {
@@ -734,6 +984,34 @@ document.addEventListener('DOMContentLoaded', async () => {
             chatMessages.appendChild(aiMsgDiv);
             const contentDiv = aiMsgDiv.querySelector('.message-content');
 
+            // Throttled & Scroll-Stabilized Streaming Renderer (Phase 2, Edge Case 1 & 4)
+            let lastRenderTime = 0;
+            let renderTimeout = null;
+
+            function scheduleRender() {
+                const now = Date.now();
+                if (now - lastRenderTime > 120) {
+                    performRender();
+                } else {
+                    if (renderTimeout) clearTimeout(renderTimeout);
+                    renderTimeout = setTimeout(performRender, 120 - (now - lastRenderTime));
+                }
+            }
+
+            function performRender() {
+                lastRenderTime = Date.now();
+                
+                // Scroll stabilization: only auto-scroll if user is close to the bottom (within 150px)
+                const shouldScroll = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 150;
+                
+                // Streaming-safe markdown rendering
+                contentDiv.innerHTML = safeRenderMarkdown(fullText);
+                
+                if (shouldScroll) {
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+            }
+
             // Read the SSE stream token by token
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
@@ -772,17 +1050,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                             loadChatHistory();
                         }
 
-                        // If it's a token, append it to the message div
+                        // If it's a token, append to text and schedule throttled render
                         if (parsed.token) {
                             fullText += parsed.token;
-                            contentDiv.innerText = fullText;
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                            scheduleRender();
                         }
                     } catch (e) {
                         // Ignore malformed SSE lines
                     }
                 }
             }
+            
+            // Force final render to clean up any remaining buffered content
+            if (renderTimeout) clearTimeout(renderTimeout);
+            performRender();
 
         } catch (err) {
             console.error(err);
@@ -945,7 +1226,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             let streamBox;
                             if (parsed.stage === 'summary') {
                                 streamBox = reportDiv.querySelector('.report-summary-text');
-                                if (streamBox) streamBox.innerText = parsed.final_text;
+                                if (streamBox) streamBox.innerHTML = safeRenderMarkdown(parsed.final_text);
                             }
                             if (parsed.stage === 'action_items' || parsed.stage === 'key_decisions') {
                                 const statusEl = reportDiv.querySelector(`#section-${parsed.stage} .report-section-title`);
@@ -1170,7 +1451,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             let streamBox;
                             if (parsed.stage === 'summary') {
                                 streamBox = reportDiv.querySelector('.report-summary-text');
-                                if (streamBox) streamBox.innerText = parsed.final_text;
+                                if (streamBox) streamBox.innerHTML = safeRenderMarkdown(parsed.final_text);
                             }
                             if (parsed.stage === 'action_items' || parsed.stage === 'key_decisions') {
                                 const statusEl = reportDiv.querySelector(`#section-${parsed.stage} .report-section-title`);

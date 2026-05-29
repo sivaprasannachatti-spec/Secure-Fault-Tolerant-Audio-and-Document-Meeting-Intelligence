@@ -64,9 +64,16 @@ class MeetingChat:
             2) If the user's question cannot be answered from the given meeting data, clearly say: 
             "This information is not available in the meeting report."
             3) When referring to speakers, use their Speaker IDs (e.g., SPEAKER_00, SPEAKER_01).
-            4) Be concise, professional, and helpful in your responses.
+            4) Be professional and helpful. Structure your responses logically to maximize readability.
             5) If the question is about action items, include the assignee, deadline, and urgency if available.
             6) If the question is about decisions, include who made the decision and the reasoning if available.
+            
+            ### Formatting Rules (CRITICAL for Readability):
+            - Always structure explanations into separate paragraphs with logical transitions and clean spacing.
+            - Use clear markdown headings (e.g., `## Heading` or `### Subheading`) to separate different concepts or topics.
+            - Use bullet points (`- Item`) or numbered lists (`1. Item`) to group details, key items, or workflows.
+            - NEVER output everything as a single, long, continuous block of text.
+            
             ### Meeting Report:
             {final_report}
             """),
@@ -82,7 +89,14 @@ class MeetingChat:
             use the chat history to understand what "that" refers to.
             4) Do not make up or assume any information not present in the meeting report.
             5) If the answer is not available, clearly say so.
-            6) Be concise, professional, and helpful.
+            6) Be professional and helpful.
+            
+            ### Formatting Rules (CRITICAL for Readability):
+            - Always structure explanations into separate paragraphs with logical transitions and clean spacing.
+            - Use clear markdown headings (e.g., `## Heading` or `### Subheading`) to separate different concepts or topics.
+            - Use bullet points (`- Item`) or numbered lists (`1. Item`) to group details, key items, or workflows.
+            - NEVER output everything as a single, long, continuous block of text.
+            
             ### Meeting Report:
             {final_report}
             """),

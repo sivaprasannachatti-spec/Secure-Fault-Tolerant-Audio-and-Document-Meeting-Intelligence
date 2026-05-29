@@ -220,13 +220,13 @@ def handleOldChat(chat_id, msg, request):
     except Exception as e:
         raise CustomException(e, sys)
 
-def handleGettingOldChat(chat_id, request):
+def handleGettingOldChat(chat_id, request, limit=None, before_id=None):
     try:
         online = isOnline()
         if online:
             response = (
                 supabase.table("chats")
-                .select("meeting_id", "chat_id")
+                .select("meeting_id, chat_id")
                 .eq("chat_id", chat_id)
                 .execute()
             )
@@ -268,18 +268,28 @@ def handleGettingOldChat(chat_id, request):
             raise HTTPException(status_code=403, detail="You cannot access this chat")
         
         if online:
-            chat = (
+            query = (
                 supabase.table("messages")
-                .select("message, type")
-                .eq("chat_id", response.data[0]['chat_id'])
-                .execute()
+                .select("message_id, message, type")
+                .eq("chat_id", chat_id)
             )
-            if not chat.data:
-                raise HTTPException(status_code=404, detail="No chat found")
-            
-            chat_history = chat.data 
+            if limit is not None:
+                query = query.order("message_id", desc=True)
+                if before_id:
+                    query = query.lt("message_id", before_id)
+                query = query.limit(limit)
+                
+                chat = query.execute()
+                if chat.data:
+                    chat_history = list(reversed(chat.data))
+                else:
+                    chat_history = []
+            else:
+                query = query.order("message_id", desc=False)
+                chat = query.execute()
+                chat_history = chat.data if chat.data else []
         else:
-            chat_history = getMessages(chat_id=chat_id) or []
+            chat_history = getMessages(chat_id=chat_id, limit=limit, before_id=before_id) or []
             
         # Get final report from the meeting data object (already fetched above)
         final_report = meeting.data[0]['final_report'] if online else target_dept_info['final_report']
@@ -291,6 +301,8 @@ def handleGettingOldChat(chat_id, request):
             "meeting_id": meeting_id,
             "meeting_type": "audio"
         })
+    except HTTPException:
+        raise
     except Exception as e:
         raise CustomException(e, sys)
 
@@ -350,9 +362,11 @@ def handleGetAllMeetings(request):
                 try:
                     response = (
                         supabase.table("meetings")
-                        .select("meeting_id, target_dept, meeting_title, final_report, team_id, is_department_wide, meeting_type")
+                        .select("meeting_id, target_dept, meeting_title, team_id, is_department_wide, meeting_type")
                         .eq("target_dept", dept_id)
                         .eq("meeting_type", "audio")
+                        .neq("final_report", "EMPTY")
+                        .neq("final_report", "")
                         .execute()
                     )
                     break
@@ -363,8 +377,10 @@ def handleGetAllMeetings(request):
                         try:
                             response = (
                                 supabase.table("meetings")
-                                .select("meeting_id, target_dept, meeting_title, final_report, team_id, is_department_wide")
+                                .select("meeting_id, target_dept, meeting_title, team_id, is_department_wide")
                                 .eq("target_dept", dept_id)
+                                .neq("final_report", "EMPTY")
+                                .neq("final_report", "")
                                 .execute()
                             )
                             break
@@ -385,34 +401,26 @@ def handleGetAllMeetings(request):
                 m_team_id = str(m.get('team_id')) if m.get('team_id') is not None else ""
                 is_wide = m.get('is_department_wide')
                 meeting_title = m.get('meeting_title')
-                report = m.get('final_report')
                 
-                # Eligibility: Must have report content AND (be Dept-Wide OR match user Team) 
-                # AND must NOT be a placeholder title like "Processing..."
-                if report and report != "EMPTY" and report.strip() != "" and "Processing..." not in meeting_title:
-                    if is_wide or m_team_id == u_team_id:
-                        valid_meetings.append(m)
-                        logging.info(f"✅ DEBUG: Meeting '{meeting_title}' APPROVED.")
-                    else:
-                        logging.info(f"❌ DEBUG: Meeting '{meeting_title}' REJECTED (Team mismatch).")
+                # Eligibility: be Dept-Wide OR match user Team
+                if is_wide or m_team_id == u_team_id:
+                    valid_meetings.append(m)
+                    logging.info(f"✅ DEBUG: Meeting '{meeting_title}' APPROVED.")
                 else:
-                    logging.info(f"❌ DEBUG: Meeting '{meeting_title}' REJECTED (Empty/In-progress report).")
+                    logging.info(f"❌ DEBUG: Meeting '{meeting_title}' REJECTED (Team mismatch).")
 
             logging.info(f"✅ FINAL: Found {len(valid_meetings)} valid meetings.")
             return JSONResponse(status_code=200, content={"meetings": valid_meetings})
         else:
             # 4. Fetch the department meetings from the local SQLite DB if offline
             from backend.utils.SQlite_utils import getMeetingsByDept
-            meetings = getMeetingsByDept(dept_id=dept_id, meeting_type='audio')
+            meetings = getMeetingsByDept(dept_id=dept_id, meeting_type='audio', exclude_report=True)
             valid_meetings = []
             for m in meetings:
-                report = m.get('final_report')
                 m_team_id = str(m.get('team_id')) if m.get('team_id') is not None else ""
                 u_team_id = str(team_id) if team_id is not None else ""
-                
-                if report and report != "EMPTY" and report.strip() != "":
-                    if m.get('is_department_wide') or m_team_id == u_team_id:
-                        valid_meetings.append(m)
+                if m.get('is_department_wide') or m_team_id == u_team_id:
+                    valid_meetings.append(m)
             
             return JSONResponse(status_code=200, content={"meetings": valid_meetings})
             

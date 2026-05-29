@@ -11,3 +11,11 @@ if not hasattr(platform, '_monkeypatched'):
     platform.machine = lambda: "AMD64"
     platform.processor = lambda: "Intel64 Family 6 Model 158 Stepping 10, GenuineIntel"
     platform._monkeypatched = True
+
+import os
+# Prevent OpenBLAS/MKL memory allocation crashes by restricting thread counts
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'

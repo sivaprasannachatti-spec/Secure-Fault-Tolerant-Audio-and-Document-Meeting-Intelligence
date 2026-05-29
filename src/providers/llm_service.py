@@ -114,7 +114,7 @@ def _get_chat_llm(provider: str):
         return ChatGroq(
             model="llama-3.3-70b-versatile",
             api_key=chat_provider_manager.get_active_key("groq"),
-            temperature=0.7,
+            temperature=0.85,
             streaming=True,
         )
 
@@ -124,7 +124,7 @@ def _get_chat_llm(provider: str):
             return ChatGoogleGenerativeAI(
                 model="gemini-2.5-flash-lite",
                 google_api_key=chat_provider_manager.get_active_key("gemini"),
-                temperature=0.7,
+                temperature=0.85,
                 streaming=True,
             )
         except ImportError:
@@ -138,6 +138,7 @@ def _get_chat_llm(provider: str):
             huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
             task="text-generation",
             max_new_tokens=2048,
+            temperature=0.85,
         )
         return ChatHuggingFace(llm=llm)
     else:
@@ -637,14 +638,14 @@ def _get_document_chat_llm(provider: str):
         return ChatGoogleGenerativeAI(
             model="gemini-1.5-flash",
             google_api_key=document_chat_provider_manager.get_active_key("gemini"),
-            temperature=0.7,
+            temperature=0.85,
             streaming=True,
         )
     elif provider == "groq":
         return ChatGroq(
             model="llama-3.3-70b-versatile",
             api_key=document_chat_provider_manager.get_active_key("groq"),
-            temperature=0.7,
+            temperature=0.85,
             streaming=True,
         )
     elif provider == "huggingface":
@@ -656,6 +657,7 @@ def _get_document_chat_llm(provider: str):
             task="text-generation",
             max_new_tokens=2048,
             streaming=True,
+            temperature=0.85,
         )
         return ChatHuggingFace(llm=llm)
     else:

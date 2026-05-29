@@ -83,6 +83,16 @@ def setup_offline_database():
                 FOREIGN KEY (meeting_id) REFERENCES meetings(meeting_id)
             )
         """)
+
+        # Performance Indexes for optimization
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_chats_user_id ON chats(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_meetings_target_dept_type ON meetings(target_dept, meeting_type)")
+
+        # Configure SQLite DB journal mode for high performance
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA synchronous = NORMAL")
+        cursor.execute("PRAGMA cache_size = -4000") # 4MB cache
         
         # Migration: Ensure columns exist if they weren't in the original schema
         try:

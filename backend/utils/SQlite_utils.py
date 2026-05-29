@@ -61,20 +61,41 @@ def getChatData(chat_id: int):
     except Exception as e:
         raise CustomException(e, sys)
 
-def getMessages(chat_id: int):
+def getMessages(chat_id: int, limit: int = None, before_id: int = None):
     try:
         conn = sqlite3.connect(database=os.environ['DB_FILE'])
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
         conn.row_factory = sqlite3.Row  
         cursor = conn.cursor()
 
-        cursor.execute(
-            "select message, type from messages where chat_id = ? ",(chat_id,)
-        )
-        messages = cursor.fetchall()
-        conn.close()
-        if messages:
-            return [dict(msg) for msg in messages]
-        return None
+        if limit is not None:
+            if before_id:
+                cursor.execute(
+                    "select message_id, message, type from messages where chat_id = ? and message_id < ? order by message_id desc limit ?",
+                    (chat_id, before_id, limit)
+                )
+            else:
+                cursor.execute(
+                    "select message_id, message, type from messages where chat_id = ? order by message_id desc limit ?",
+                    (chat_id, limit)
+                )
+            messages = cursor.fetchall()
+            conn.close()
+            if messages:
+                # Return in chronological order
+                return list(reversed([dict(msg) for msg in messages]))
+            return []
+        else:
+            cursor.execute(
+                "select message_id, message, type from messages where chat_id = ? order by message_id asc",
+                (chat_id,)
+            )
+            messages = cursor.fetchall()
+            conn.close()
+            if messages:
+                return [dict(msg) for msg in messages]
+            return []
     except Exception as e:
         raise CustomException(e, sys)
 
@@ -304,14 +325,25 @@ def getMeetingContent(meeting_id: int):
     except Exception as e:
         raise CustomException(e, sys)
 
-def getMeetingsByDept(dept_id: int, meeting_type: str = None):
+def getMeetingsByDept(dept_id: int, meeting_type: str = None, exclude_report: bool = False):
     """Retrieves all meetings in a department, optionally filtered by meeting_type."""
     try:
         conn = sqlite3.connect(database=os.environ['DB_FILE'])
         conn.row_factory = sqlite3.Row  
         cursor = conn.cursor()
 
-        query = "SELECT * FROM meetings WHERE target_dept = ?"
+        if exclude_report:
+            query = """
+                SELECT meeting_id, target_dept, team_id, is_department_wide, meeting_title, meeting_type, synced 
+                FROM meetings 
+                WHERE target_dept = ? 
+                  AND final_report IS NOT NULL 
+                  AND final_report != '' 
+                  AND final_report != 'EMPTY'
+            """
+        else:
+            query = "SELECT * FROM meetings WHERE target_dept = ?"
+            
         params = [dept_id]
         if meeting_type:
             query += " AND meeting_type = ?"

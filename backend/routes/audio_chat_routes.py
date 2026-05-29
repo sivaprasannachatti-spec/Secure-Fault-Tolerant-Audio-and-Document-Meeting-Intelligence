@@ -62,9 +62,9 @@ def oldChat(chat_id: int, msg: Chat, request: Request):
         raise CustomException(e, sys)
 
 @chat_router.get("/getOldChat/{chat_id}", dependencies=[Depends(verifyJWT)])
-def getOldChat(chat_id: int, request: Request):
+def getOldChat(chat_id: int, request: Request, limit: Optional[int] = None, before_id: Optional[int] = None):
     try:
-        return handleGettingOldChat(chat_id=chat_id, request=request)
+        return handleGettingOldChat(chat_id=chat_id, request=request, limit=limit, before_id=before_id)
     except HTTPException:
         raise
     except Exception as e:

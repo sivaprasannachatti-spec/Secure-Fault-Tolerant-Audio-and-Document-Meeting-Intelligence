@@ -123,20 +123,20 @@ def getDocumentContent(request: Request, meeting_id: int):
 
 
 @document_notes_router.get("/chat/{chat_id}", dependencies=[Depends(verifyJWT)])
-def documentGetOldChat(chat_id: int, request: Request):
+def documentGetOldChat(chat_id: int, request: Request, limit: Optional[int] = None, before_id: Optional[int] = None):
     """Retrieves old chat messages for a document-based meeting."""
     try:
-        return handleDocumentGetOldChat(chat_id=chat_id, request=request)
+        return handleDocumentGetOldChat(chat_id=chat_id, request=request, limit=limit, before_id=before_id)
     except HTTPException:
         raise
     except Exception as e:
         raise CustomException(e, sys)
 
 @document_notes_router.get("/getOldChat/{chat_id}", dependencies=[Depends(verifyJWT)])
-def documentGetOldChatAlias(chat_id: int, request: Request):
+def documentGetOldChatAlias(chat_id: int, request: Request, limit: Optional[int] = None, before_id: Optional[int] = None):
     """Alias for /chat/{chat_id} — matches the frontend's shared URL pattern."""
     try:
-        return handleDocumentGetOldChat(chat_id=chat_id, request=request)
+        return handleDocumentGetOldChat(chat_id=chat_id, request=request, limit=limit, before_id=before_id)
     except HTTPException:
         raise
     except Exception as e:

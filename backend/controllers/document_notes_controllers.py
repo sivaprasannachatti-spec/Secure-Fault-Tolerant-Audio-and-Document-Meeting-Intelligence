@@ -260,7 +260,7 @@ def handleDocumentOldChat(chat_id, msg, request):
         raise CustomException(e, sys)
 
 
-def handleDocumentGetOldChat(chat_id, request):
+def handleDocumentGetOldChat(chat_id, request, limit=None, before_id=None):
     """Retrieves old chat messages for a document-based meeting."""
     try:
         online = isOnline()
@@ -313,15 +313,28 @@ def handleDocumentGetOldChat(chat_id, request):
             raise HTTPException(status_code=403, detail="You cannot access this chat")
 
         if online:
-            chat = (
+            query = (
                 supabase.table("messages")
-                .select("message, type")
+                .select("message_id, message, type")
                 .eq("chat_id", chat_id)
-                .execute()
             )
-            chat_history = chat.data if chat.data else []
+            if limit is not None:
+                query = query.order("message_id", desc=True)
+                if before_id:
+                    query = query.lt("message_id", before_id)
+                query = query.limit(limit)
+                
+                chat = query.execute()
+                if chat.data:
+                    chat_history = list(reversed(chat.data))
+                else:
+                    chat_history = []
+            else:
+                query = query.order("message_id", desc=False)
+                chat = query.execute()
+                chat_history = chat.data if chat.data else []
         else:
-            chat_history = getMessages(chat_id=chat_id) or []
+            chat_history = getMessages(chat_id=chat_id, limit=limit, before_id=before_id) or []
 
         # Get document tree for context
         tree_data = get_document_tree(meeting_id=meeting_id)
@@ -350,9 +363,11 @@ def handleGetAllDocuments(request):
             try:
                 response = (
                     supabase.table("meetings")
-                    .select("meeting_id, target_dept, meeting_title, final_report, team_id, is_department_wide, meeting_type")
+                    .select("meeting_id, target_dept, meeting_title, team_id, is_department_wide, meeting_type")
                     .eq("target_dept", dept_id)
                     .eq("meeting_type", "document")
+                    .neq("final_report", "EMPTY")
+                    .neq("final_report", "")
                     .execute()
                 )
             except APIError as e:
@@ -360,8 +375,10 @@ def handleGetAllDocuments(request):
                     logging.warning("⚠️ Supabase 'meeting_type' column missing. Falling back to non-isolated query.")
                     response = (
                         supabase.table("meetings")
-                        .select("meeting_id, target_dept, meeting_title, final_report, team_id, is_department_wide")
+                        .select("meeting_id, target_dept, meeting_title, team_id, is_department_wide")
                         .eq("target_dept", dept_id)
+                        .neq("final_report", "EMPTY")
+                        .neq("final_report", "")
                         .execute()
                     )
                 else:
@@ -369,14 +386,14 @@ def handleGetAllDocuments(request):
             data = response.data
         else:
             from backend.utils.SQlite_utils import getMeetingsByDept
-            data = getMeetingsByDept(dept_id=dept_id, meeting_type='document')
+            data = getMeetingsByDept(dept_id=dept_id, meeting_type='document', exclude_report=True)
 
         valid_docs = []
         u_team_id = str(team_id) if team_id is not None else ""
         
         for d in data:
             d_team_id = str(d.get('team_id')) if d.get('team_id') is not None else ""
-            if d.get('final_report') and (d.get('is_department_wide') or d_team_id == u_team_id):
+            if d.get('is_department_wide') or d_team_id == u_team_id:
                 valid_docs.append(d)
 
         return JSONResponse(status_code=200, content={"meetings": valid_docs})
