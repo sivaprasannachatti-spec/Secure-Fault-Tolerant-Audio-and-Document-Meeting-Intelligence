@@ -1,4 +1,4 @@
-# 🎙️ MeetingAI: Enterprise-Grade Meeting Intelligence
+# 🎙️ Secure Fault Tolerant Audio and Document Meeting Intelligence: Enterprise-Grade Meeting Intelligence
 
 Welcome to **MeetingAI**, a production-ready, high-performance meeting intelligence platform. MeetingAI transforms chaotic audio recordings into structured, high-value business insights using a state-of-the-art multi-agent AI pipeline. 
 
