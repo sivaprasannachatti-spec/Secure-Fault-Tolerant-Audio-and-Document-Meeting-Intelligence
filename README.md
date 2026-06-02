@@ -1,12 +1,12 @@
 # 🎙️ Secure Fault Tolerant Audio and Document Meeting Intelligence: Enterprise-Grade Meeting Intelligence
 
-Welcome to **MeetingAI**, a production-ready, high-performance meeting intelligence platform. MeetingAI transforms chaotic audio recordings into structured, high-value business insights using a state-of-the-art multi-agent AI pipeline. 
+Welcome to **Secure Fault Tolerant Audio and Document Meeting Intelligence**, a production-ready, high-performance meeting intelligence platform. MeetingAI transforms chaotic audio recordings into structured, high-value business insights using a state-of-the-art multi-agent AI pipeline. 
 
 Whether you are in a high-speed corporate environment or a remote team, MeetingAI ensures that no decision is forgotten, no action item is missed, and every meeting becomes a searchable, interactive knowledge asset.
 
 ---
 
-## 🌟 Why MeetingAI?
+## 🌟 Why Secure Fault Tolerant Audio and Document Meeting Intelligence?
 
 *   **⚡ Sub-Second Responsiveness:** Experience "ChatGPT-style" real-time streaming for summaries and chat.
 *   **🔒 Privacy-First Security:** Your data is protected by **Group-Based Access Control (GBAC)**. Summaries are shared within teams, but your personal chat history remains 100% private.
@@ -95,7 +95,7 @@ ollama pull llama3.2:3b
 ---
 
 ## 🤝 Contributing
-We believe in the power of open meeting intelligence. Feel free to submit PRs, report bugs, or suggest new features to help make **MeetingAI** the best workspace for every team!
+We believe in the power of open meeting intelligence. Feel free to submit PRs, report bugs, or suggest new features to help make **Secure Fault Tolerant Audio and Document Meeting Intelligence** the best workspace for every team!
 
 ---
-**Built with ❤️ by the MeetingAI Team.**
+**Built with ❤️ by the Secure Fault Tolerant Audio and Document Meeting Intelligence Team.**
