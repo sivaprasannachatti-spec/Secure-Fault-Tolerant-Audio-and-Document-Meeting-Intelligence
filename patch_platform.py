@@ -19,3 +19,13 @@ os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
 os.environ['NUMEXPR_NUM_THREADS'] = '1'
+
+# Set default DB_FILE to prevent KeyError and ensure Vercel uses /tmp (read-only filesystem workaround)
+if os.environ.get('VERCEL'):
+    os.environ.setdefault('DB_FILE', '/tmp/offline_queue.db')
+    os.environ.setdefault('JWT_SECRET_KEY', 'default_secret_key_for_meeting_intelligence')
+    os.environ.setdefault('SUPABASE_PROJECT_URL', 'https://placeholder-project.supabase.co')
+    os.environ.setdefault('SUPABASE_API_KEY', 'placeholder-anon-key')
+else:
+    os.environ.setdefault('DB_FILE', 'offline_queue.db')
+    os.environ.setdefault('JWT_SECRET_KEY', 'default_secret_key_for_meeting_intelligence')
