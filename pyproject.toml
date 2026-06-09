@@ -1,2 +1,31 @@
+[project]
+name = "secure-fault-tolerant-audio-and-document-meeting-intelligence"
+version = "2.0.0"
+description = "Enterprise-Grade Meeting Intelligence Platform"
+requires-python = ">=3.10"
+dependencies = [
+    "langchain",
+    "langchain-core",
+    "langchain-classic",
+    "langchain-ollama",
+    "langchain-groq",
+    "langgraph",
+    "pydantic",
+    "python-dotenv",
+    "librosa",
+    "fastapi",
+    "uvicorn",
+    "supabase",
+    "PyJWT",
+    "noisereduce",
+    "python-multipart",
+    "langchain-huggingface",
+    "psutil",
+    "pdfplumber",
+    "python-docx",
+    "tiktoken",
+    "langchain-google-genai"
+]
+
 [tool.vercel]
 entrypoint = "backend.app:app"
