@@ -20,12 +20,127 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from dotenv import load_dotenv
 
-# Optional HuggingFace Import
-try:
-    from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
-    HF_AVAILABLE = True
-except ImportError:
-    HF_AVAILABLE = False
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage, AIMessage
+from langchain_core.outputs import ChatResult, ChatGeneration
+
+HF_AVAILABLE = True
+
+class CustomHFChatModel(BaseChatModel):
+    repo_id: str
+    huggingfacehub_api_token: str
+    max_new_tokens: int = 2048
+    temperature: float = 0.85
+
+    @property
+    def _llm_type(self) -> str:
+        return "custom_hf_chat"
+
+    def _generate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        import httpx
+        prompt = ""
+        for m in messages:
+            if m.type == "system":
+                prompt += f"System: {m.content}\n"
+            elif m.type == "human" or m.type == "user":
+                prompt += f"User: {m.content}\n"
+            elif m.type == "ai" or m.type == "assistant":
+                prompt += f"Assistant: {m.content}\n"
+        prompt += "Assistant:"
+
+        headers = {"Authorization": f"Bearer {self.huggingfacehub_api_token}"}
+        payload = {
+            "inputs": prompt,
+            "parameters": {
+                "max_new_tokens": self.max_new_tokens,
+                "temperature": self.temperature,
+                "return_full_text": False
+            }
+        }
+
+        with httpx.Client(timeout=120.0) as client:
+            response = client.post(
+                f"https://api-inference.huggingface.co/models/{self.repo_id}",
+                headers=headers,
+                json=payload
+            )
+
+        if response.status_code != 200:
+            raise Exception(f"HuggingFace API failed ({response.status_code}): {response.text}")
+
+        data = response.json()
+        text = ""
+        if isinstance(data, list) and len(data) > 0 and "generated_text" in data[0]:
+            text = data[0]["generated_text"]
+        elif isinstance(data, dict) and "generated_text" in data:
+            text = data["generated_text"]
+        else:
+            text = str(data)
+
+        if text.startswith("Assistant:"):
+            text = text[len("Assistant:"):].strip()
+
+        generation = ChatGeneration(message=AIMessage(content=text))
+        return ChatResult(generations=[generation])
+
+    async def _agenerate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        import httpx
+        prompt = ""
+        for m in messages:
+            if m.type == "system":
+                prompt += f"System: {m.content}\n"
+            elif m.type == "human" or m.type == "user":
+                prompt += f"User: {m.content}\n"
+            elif m.type == "ai" or m.type == "assistant":
+                prompt += f"Assistant: {m.content}\n"
+        prompt += "Assistant:"
+
+        headers = {"Authorization": f"Bearer {self.huggingfacehub_api_token}"}
+        payload = {
+            "inputs": prompt,
+            "parameters": {
+                "max_new_tokens": self.max_new_tokens,
+                "temperature": self.temperature,
+                "return_full_text": False
+            }
+        }
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"https://api-inference.huggingface.co/models/{self.repo_id}",
+                headers=headers,
+                json=payload
+            )
+
+        if response.status_code != 200:
+            raise Exception(f"HuggingFace API failed ({response.status_code}): {response.text}")
+
+        data = response.json()
+        text = ""
+        if isinstance(data, list) and len(data) > 0 and "generated_text" in data[0]:
+            text = data[0]["generated_text"]
+        elif isinstance(data, dict) and "generated_text" in data:
+            text = data["generated_text"]
+        else:
+            text = str(data)
+
+        if text.startswith("Assistant:"):
+            text = text[len("Assistant:"):].strip()
+
+        generation = ChatGeneration(message=AIMessage(content=text))
+        return ChatResult(generations=[generation])
 
 from src.logger import logging
 from src.providers.provider_manager import ProviderManager, ProviderStatus
@@ -91,17 +206,11 @@ def get_generation_model(provider: str, task_type: str = "summary"):
             raise ImportError("langchain-google-genai not installed.")
             
     elif provider == "huggingface":
-        if not HF_AVAILABLE:
-            raise ImportError("langchain-huggingface not installed. Please restart server.")
-            
-        llm = HuggingFaceEndpoint(
+        return CustomHFChatModel(
             repo_id="Qwen/Qwen2.5-7B-Instruct",
-            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
-            task="text-generation",
+            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN") or "",
             max_new_tokens=2048,
-            streaming=True,
         )
-        return ChatHuggingFace(llm=llm)
     else:
         from src.utils import QWEN_MODEL
         return QWEN_MODEL
@@ -131,16 +240,12 @@ def _get_chat_llm(provider: str):
             raise ImportError("langchain-google-genai not installed.")
 
     elif provider == "huggingface":
-        if not HF_AVAILABLE:
-            raise ImportError("langchain-huggingface not installed.")
-        llm = HuggingFaceEndpoint(
+        return CustomHFChatModel(
             repo_id="mistralai/Mistral-7B-Instruct-v0.2",
-            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
-            task="text-generation",
+            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN") or "",
             max_new_tokens=2048,
             temperature=0.85,
         )
-        return ChatHuggingFace(llm=llm)
     else:
         from src.utils import LLAMA_MODEL
         return LLAMA_MODEL
@@ -534,16 +639,11 @@ def _get_document_llm(provider: str):
             streaming=True,
         )
     elif provider == "huggingface":
-        if not HF_AVAILABLE:
-            raise ImportError("langchain-huggingface not installed.")
-        llm = HuggingFaceEndpoint(
+        return CustomHFChatModel(
             repo_id="Qwen/Qwen2.5-72B-Instruct",
-            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
-            task="text-generation",
+            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN") or "",
             max_new_tokens=4096,
-            streaming=True,
         )
-        return ChatHuggingFace(llm=llm)
     else:
         raise ValueError(f"Unknown document provider: {provider}")
 
@@ -649,17 +749,12 @@ def _get_document_chat_llm(provider: str):
             streaming=True,
         )
     elif provider == "huggingface":
-        if not HF_AVAILABLE:
-            raise ImportError("langchain-huggingface not installed.")
-        llm = HuggingFaceEndpoint(
+        return CustomHFChatModel(
             repo_id="mistralai/Mistral-7B-Instruct-v0.3",
-            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN"),
-            task="text-generation",
+            huggingfacehub_api_token=os.environ.get("HUGGING_FACE_ACCESS_TOKEN") or "",
             max_new_tokens=2048,
-            streaming=True,
             temperature=0.85,
         )
-        return ChatHuggingFace(llm=llm)
     else:
         raise ValueError(f"Provider {provider} not allowed for Document Chat.")
 

@@ -19,7 +19,6 @@ dependencies = [
     "PyJWT",
     "noisereduce",
     "python-multipart",
-    "langchain-huggingface",
     "psutil",
     "pdfplumber",
     "python-docx",
