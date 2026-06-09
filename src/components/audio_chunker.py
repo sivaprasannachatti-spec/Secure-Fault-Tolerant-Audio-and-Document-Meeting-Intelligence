@@ -1,5 +1,5 @@
 import io
-import librosa
+import numpy as np
 import soundfile as sf
 import tempfile
 import os
@@ -35,8 +35,24 @@ class AudioChunker:
                 temp_file.write(audio_bytes)
                 temp_path = temp_file.name
 
-            # Load audio using librosa (assuming 16kHz mono from data_transformation)
-            audio, sr = librosa.load(temp_path, sr=16000, mono=True)
+            # Load audio using soundfile (much lighter than librosa)
+            audio, sr = sf.read(temp_path)
+            
+            # Convert to mono if stereo
+            if len(audio.shape) > 1:
+                audio = np.mean(audio, axis=1)
+                
+            # Resample to 16000Hz using numpy interpolation if needed
+            if sr != 16000:
+                duration = len(audio) / sr
+                num_samples = int(duration * 16000)
+                audio = np.interp(
+                    np.linspace(0, len(audio) - 1, num_samples),
+                    np.arange(len(audio)),
+                    audio
+                )
+                sr = 16000
+                
             total_duration = len(audio) / sr
             logging.info(f"Chunking audio: {total_duration:.2f}s total duration.")
 

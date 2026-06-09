@@ -6,12 +6,10 @@ langchain-groq
 langgraph
 pydantic
 python-dotenv
-librosa
 fastapi
 uvicorn
 supabase
 PyJWT
-noisereduce
 python-multipart
 psutil
 pdfplumber
