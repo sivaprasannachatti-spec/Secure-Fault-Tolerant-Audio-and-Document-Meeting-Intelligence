@@ -6,9 +6,6 @@ langchain-groq
 langgraph
 pydantic
 python-dotenv
-openai-whisper
-pyannote-audio
-torch
 librosa
 fastapi
 uvicorn
@@ -16,7 +13,6 @@ supabase
 PyJWT
 noisereduce
 python-multipart
-faster-whisper
 langchain-huggingface
 psutil
 pdfplumber
