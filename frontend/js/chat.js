@@ -1,6 +1,7 @@
-// Use 127.0.0.1 to avoid CORS "Localhost vs 127" browser confusion
-const AUDIO_API_URL = "http://127.0.0.1:9000/api"; 
-const DOCS_API_URL = "http://127.0.0.1:8001/api";
+// Use dynamic origin path to support seamless deployment and resolve local CORS issues
+const API_BASE_URL = `${window.location.origin}/api`;
+const AUDIO_API_URL = API_BASE_URL; 
+const DOCS_API_URL = API_BASE_URL;
 
 document.addEventListener('DOMContentLoaded', async () => {
     const chatHistoryList = document.getElementById('chat-history-list');

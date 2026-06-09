@@ -78,14 +78,9 @@ mode = os.getenv("APP_MODE", "AUDIO").strip().upper()
 # Frontend expects /api/user prefix (singular)
 app.include_router(user_router, prefix="/api/user", tags=["Users"])
 
-if mode == "DOCS":
-    # Document Intelligence Workspace
-    # Frontend expects /api/documents prefix
-    app.include_router(document_notes_router, prefix="/api/documents", tags=["Document Notes"])
-else:
-    # Audio Intelligence Workspace (Default)
-    # Frontend expects /api/chat prefix
-    app.include_router(chat_router, prefix="/api/chat", tags=["Audio Chat"])
+# Include both Document and Audio intelligence workspaces on a single port for production deployment
+app.include_router(document_notes_router, prefix="/api/documents", tags=["Document Notes"])
+app.include_router(chat_router, prefix="/api/chat", tags=["Audio Chat"])
 
 @app.get("/api/health")
 def health_check():
