@@ -27,6 +27,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global Exception Handler to bubble up error trace details to the frontend
+from fastapi import Request
+from fastapi.responses import JSONResponse
+import traceback
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    error_msg = str(exc)
+    if hasattr(exc, 'error_message'):
+        error_msg = exc.error_message
+    print(f"ERROR: Global exception caught: {error_msg}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": error_msg}
+    )
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Initializing Server Lifespan...")
