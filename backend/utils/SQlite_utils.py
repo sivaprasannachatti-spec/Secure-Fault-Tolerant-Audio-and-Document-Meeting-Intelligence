@@ -172,7 +172,7 @@ def sync_offline_data_to_supabase():
                 # Push to Supabase
                 response = supabase.table("chats").insert({
                     "chat_title": chat['chat_title'],
-                    "id": chat['user_id'],          
+                    "user_id": chat['user_id'],          
                     "meeting_id": chat['meeting_id']
                 }).execute()
                 

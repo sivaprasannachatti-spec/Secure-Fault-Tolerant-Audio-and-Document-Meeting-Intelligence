@@ -18,9 +18,9 @@ asr_provider_manager = provider_manager
 
 async def _invoke_assemblyai(audio_bytes: bytes) -> str:
     """Upload and transcribe via AssemblyAI Universal-1 with Diarization."""
-    api_key = os.environ.get("ASSEMBLYAI_API_KEY")
+    api_key = asr_provider_manager.get_active_key("assemblyai")
     if not api_key:
-        raise ValueError("ASSEMBLYAI_API_KEY is not set.")
+        raise ValueError("ASSEMBLYAI_API_KEY / ASSEMBLY_API_KEY is not set.")
         
     headers = {"authorization": api_key}
     
@@ -90,7 +90,7 @@ async def _invoke_assemblyai(audio_bytes: bytes) -> str:
 
 async def _invoke_deepgram(audio_bytes: bytes) -> str:
     """Transcribe via Deepgram Nova-3 with Diarization."""
-    api_key = os.environ.get("DEEPGRAM_API_KEY")
+    api_key = asr_provider_manager.get_active_key("deepgram")
     if not api_key:
         raise ValueError("DEEPGRAM_API_KEY is not set.")
         
@@ -177,7 +177,7 @@ async def transcribe_audio_full(audio_bytes: bytes) -> str:
         except Exception as e:
             error_msg = str(e).lower()
             if "rate limit" in error_msg or "429" in error_msg or "402" in error_msg or "payment required" in error_msg or "403" in error_msg:
-                asr_provider_manager.mark_rate_limited(provider, 300.0) # wait 5 minutes if out of credits
+                asr_provider_manager.mark_rate_limited(provider, key_if_any=api_key, reset_after=300.0) # wait 5 minutes if out of credits
                 logging.warning(f"⚠️ [{provider}] rate limited or out of credits, switching provider...")
             else:
                 asr_provider_manager.record_failure(provider, type(e).__name__)

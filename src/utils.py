@@ -1,6 +1,7 @@
+import os
 import platform
 # Python 3.14 Windows Hang Fix
-if not hasattr(platform, '_monkeypatched'):
+if os.name == 'nt' and not hasattr(platform, '_monkeypatched'):
     platform.system = lambda: "Windows"
     platform.release = lambda: "10"
     platform.version = lambda: "10.0.19041"

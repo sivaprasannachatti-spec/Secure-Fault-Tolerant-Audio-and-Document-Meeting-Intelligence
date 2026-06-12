@@ -1,8 +1,9 @@
+import os
 import platform
 
 # Python 3.14 Windows Hang Fix
 # platform.system() and related calls hang indefinitely in this environment.
-if not hasattr(platform, '_monkeypatched'):
+if os.name == 'nt' and not hasattr(platform, '_monkeypatched'):
     print("Applying platform monkeypatch for Python 3.14 on Windows...")
     platform.system = lambda: "Windows"
     platform.release = lambda: "10"

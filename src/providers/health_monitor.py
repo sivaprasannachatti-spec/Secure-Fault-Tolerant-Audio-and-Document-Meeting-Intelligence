@@ -169,8 +169,11 @@ class HealthMonitor:
     async def _ping_assemblyai(self) -> bool:
         """Check if AssemblyAI API is responsive."""
         try:
+            api_key = provider_manager.get_active_key("assemblyai")
+            if not api_key:
+                return False
             async with aiohttp.ClientSession() as session:
-                headers = {"Authorization": f"{os.environ.get('ASSEMBLYAI_API_KEY')}"}
+                headers = {"Authorization": api_key}
                 async with session.get(
                     "https://api.assemblyai.com/v2/account",
                     headers=headers,
@@ -183,8 +186,11 @@ class HealthMonitor:
     async def _ping_deepgram(self) -> bool:
         """Check if Deepgram API is responsive."""
         try:
+            api_key = provider_manager.get_active_key("deepgram")
+            if not api_key:
+                return False
             async with aiohttp.ClientSession() as session:
-                headers = {"Authorization": f"Token {os.environ.get('DEEPGRAM_API_KEY')}"}
+                headers = {"Authorization": f"Token {api_key}"}
                 async with session.get(
                     "https://api.deepgram.com/v1/projects",
                     headers=headers,

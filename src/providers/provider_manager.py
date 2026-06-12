@@ -5,9 +5,10 @@ Tracks health, latency, rate limits, and failures for each inference provider.
 Selects the best available provider with automatic failover.
 """
 
+import os
 import platform
 # Python 3.14 Windows Hang Fix
-if not hasattr(platform, '_monkeypatched'):
+if os.name == 'nt' and not hasattr(platform, '_monkeypatched'):
     platform.system = lambda: "Windows"
     platform.release = lambda: "10"
     platform.version = lambda: "10.0.19041"
@@ -58,12 +59,13 @@ class KeyRotator:
         self.cooldown_seconds = cooldown_seconds
         
         raw = os.getenv(env_var_name, "")
+        if not raw:
+            raw = os.getenv(env_var_name.replace("_KEYS", "_KEY"), "")
+        if not raw and "ASSEMBLY" in env_var_name:
+            raw = os.getenv("ASSEMBLY_API_KEY", "") or os.getenv("ASSEMBLY_API_KEYS", "")
+            
+        # Always split by comma to support lists in singular or plural env vars
         keys = [k.strip() for k in raw.split(",") if k.strip()]
-        
-        # If the plural variable is empty, try the singular fallback
-        if not keys:
-            singular = os.getenv(env_var_name.replace("_KEYS", "_KEY"), "")
-            if singular: keys = [singular]
 
         self.key_states = [KeyState(key=k) for k in keys]
         self.current_ptr = 0
@@ -228,8 +230,14 @@ class ProviderManager:
         
         if name == "ASR":
             self.providers = {
-                "assemblyai": ProviderState(name=f"AssemblyAI-{name}"),
-                "deepgram": ProviderState(name=f"Deepgram-{name}"),
+                "assemblyai": ProviderState(
+                    name=f"AssemblyAI-{name}",
+                    key_rotator=get_shared_rotator("ASSEMBLYAI_API_KEYS")
+                ),
+                "deepgram": ProviderState(
+                    name=f"Deepgram-{name}",
+                    key_rotator=get_shared_rotator("DEEPGRAM_API_KEYS")
+                ),
             }
             self.priority_order = ["assemblyai", "deepgram"]
             
@@ -307,10 +315,37 @@ class ProviderManager:
             if provider_name in self.providers:
                 state = self.providers[provider_name]
                 if state.key_rotator:
-                    return state.key_rotator.get_key()
-            # Default to env if no rotator
-            env_map = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY", "huggingface": "HUGGING_FACE_ACCESS_TOKEN"}
-            return os.getenv(env_map.get(provider_name, ""), "")
+                    key = state.key_rotator.get_key()
+                    if key:
+                        return key
+            # Default to env if no rotator or no key returned
+            env_map = {
+                "groq": "GROQ_API_KEY", 
+                "gemini": "GEMINI_API_KEY", 
+                "huggingface": "HUGGING_FACE_ACCESS_TOKEN",
+                "assemblyai": "ASSEMBLYAI_API_KEY",
+                "deepgram": "DEEPGRAM_API_KEY"
+            }
+            key_name = env_map.get(provider_name, "")
+            raw = os.getenv(key_name, "")
+            if not raw and provider_name == "assemblyai":
+                raw = os.getenv("ASSEMBLY_API_KEY", "")
+            # Return first key if comma-separated
+            keys = [k.strip() for k in raw.split(",") if k.strip()]
+            return keys[0] if keys else ""
+
+    def force_recover(self, provider_name: str):
+        """Force a provider to recover to HEALTHY status."""
+        with self._lock:
+            if provider_name in self.providers:
+                state = self.providers[provider_name]
+                state.status = ProviderStatus.HEALTHY
+                state.consecutive_failures = 0
+                if state.key_rotator:
+                    for k_state in state.key_rotator.key_states:
+                        k_state.status = KeyStatus.ACTIVE
+                        k_state.failure_count = 0
+                logging.info(f"🔄 [{self.name}] Provider [{provider_name}] force-recovered to HEALTHY")
 
     def select_provider(self) -> str:
         """Select the best available provider based on priority and health."""

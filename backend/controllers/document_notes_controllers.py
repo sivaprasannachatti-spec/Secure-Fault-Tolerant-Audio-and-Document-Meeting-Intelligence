@@ -156,7 +156,7 @@ def handleDocumentNewChat(msg, request):
         if online:
             resp = (
                 supabase.table("chats")
-                .insert({"chat_title": chat_title, "id": request.state.user['id'], "meeting_id": meeting['meeting_id']})
+                .insert({"chat_title": chat_title, "user_id": request.state.user['id'], "meeting_id": meeting['meeting_id']})
                 .execute()
             )
             chat_id = resp.data[0]['chat_id']
@@ -411,7 +411,7 @@ def handleGetAllDocumentChats(request):
                 response = (
                     supabase.table("chats")
                     .select("chat_title, chat_id, meetings!inner(meeting_type)")
-                    .eq("id", user_id)
+                    .eq("user_id", user_id)
                     .eq("meetings.meeting_type", "document")
                     .execute()
                 )
@@ -421,7 +421,7 @@ def handleGetAllDocumentChats(request):
                     response = (
                         supabase.table("chats")
                         .select("chat_title, chat_id, meetings!inner(meeting_id)")
-                        .eq("id", user_id)
+                        .eq("user_id", user_id)
                         .execute()
                     )
                 else:
