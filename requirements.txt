@@ -16,4 +16,8 @@ pdfplumber
 python-docx
 tiktoken
 langchain-google-genai
+numpy
+soundfile
+aiohttp
+httpx
 # -e .

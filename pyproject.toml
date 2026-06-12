@@ -21,7 +21,11 @@ dependencies = [
     "pdfplumber",
     "python-docx",
     "tiktoken",
-    "langchain-google-genai"
+    "langchain-google-genai",
+    "numpy",
+    "soundfile",
+    "aiohttp",
+    "httpx"
 ]
 
 [tool.vercel]
