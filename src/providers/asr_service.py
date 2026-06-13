@@ -158,9 +158,10 @@ async def transcribe_audio_full(audio_bytes: bytes) -> str:
         logging.info(f"🎤 ASR ROUTING -> USING PROVIDER: [{provider.upper()}]")
         logging.info(f"==================================================")
 
+        api_key = None
         try:
             start = time.monotonic()
-            
+            api_key = asr_provider_manager.get_active_key(provider)
             if provider == "assemblyai":
                 transcript = await _invoke_assemblyai(audio_bytes)
             elif provider == "deepgram":

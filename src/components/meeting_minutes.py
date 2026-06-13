@@ -24,7 +24,30 @@ class MeetingProcessor:
 
         # Stage 1: Audio Transcription (Must be first)
         yield f"data: {json.dumps({'stage': 'transcription', 'status': 'in_progress'})}\n\n"
-        result = convert_audio(state)
+        
+        # Run convert_audio in a separate thread so we can yield keep-alives to prevent timeouts
+        trans_queue = queue.Queue()
+        def run_trans():
+            try:
+                res = convert_audio(state)
+                trans_queue.put(("success", res))
+            except Exception as e:
+                trans_queue.put(("error", e))
+                
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            executor.submit(run_trans)
+            while True:
+                try:
+                    status, val = trans_queue.get(timeout=5.0)
+                    if status == "success":
+                        result = val
+                        break
+                    else:
+                        raise val
+                except queue.Empty:
+                    # Yield a keep-alive event to keep the connection open
+                    yield f"data: {json.dumps({'stage': 'transcription', 'status': 'in_progress', 'keep_alive': True})}\n\n"
+                    
         state.update(result)
         yield f"data: {json.dumps({'stage': 'transcription', 'status': 'done'})}\n\n"
 
@@ -59,13 +82,14 @@ class MeetingProcessor:
             completed_stages = 0
             while completed_stages < 4:
                 try:
-                    item = token_queue.get(timeout=120) 
+                    item = token_queue.get(timeout=5.0) 
                     if item.get('status') in ['done', 'error']:
                         completed_stages += 1
                         # Forward the final status event to frontend
                         yield f"data: {json.dumps(item)}\n\n"
                 except queue.Empty:
-                    break
+                    # Yield a keep-alive event to keep the connection open
+                    yield f"data: {json.dumps({'stage': 'generation_pending', 'status': 'in_progress', 'keep_alive': True})}\n\n"
 
         # Stage 5: Format Final Report
         yield f"data: {json.dumps({'stage': 'formatting', 'status': 'in_progress'})}\n\n"

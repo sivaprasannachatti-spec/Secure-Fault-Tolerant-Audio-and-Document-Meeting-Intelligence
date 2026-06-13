@@ -293,6 +293,7 @@ def invoke_generation(chain_builder, invoke_args: dict) -> str:
         logging.info(f"GENERATION ROUTING -> USING PROVIDER: [{provider.upper()}]")
         logging.info("--------------------------------------------------")
 
+        api_key = "N/A"
         try:
             api_key = generation_provider_manager.get_active_key(provider)
             start = time.monotonic()
@@ -509,6 +510,7 @@ def invoke_chat(chain_builder, invoke_args: dict):
         logging.info(f"CHAT ROUTING -> USING PROVIDER: [{provider.upper()}]")
         logging.info("--------------------------------------------------")
 
+        api_key = "N/A"
         try:
             api_key = chat_provider_manager.get_active_key(provider)
             start = time.monotonic()

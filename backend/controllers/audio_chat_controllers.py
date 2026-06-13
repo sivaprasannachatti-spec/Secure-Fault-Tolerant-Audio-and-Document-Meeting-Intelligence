@@ -25,20 +25,37 @@ TRANSCRIPTION_SEMAPHORE = asyncio.Semaphore(1)
 
 def handleMeetingGeneration(request, audio_bytes, is_department_wide):
     try:
-        import json
-        online = isOnline()
-        audio_transformation = DataTransformation()
-        cleaned_audio = audio_transformation.preprocess_audio(audio_bytes=audio_bytes)
-        
-        if(cleaned_audio == None):
-            raise HTTPException(status_code=400, detail="Please upload any meeting")
-            
         dept_id = request.state.user['dept_id']
         team_id = request.state.user.get('team_id')
+        online = isOnline()
 
         async def stream_pipeline():
             from fastapi.concurrency import iterate_in_threadpool
+            import json
             
+            # Start streaming immediately to establish the connection and prevent Render 30s timeout
+            yield f"data: {json.dumps({'stage': 'preprocessing', 'status': 'in_progress'})}\n\n"
+            
+            try:
+                # Run preprocessing in a thread pool to avoid blocking the ASGI server
+                loop = asyncio.get_running_loop()
+                audio_transformation = DataTransformation()
+                cleaned_audio = await loop.run_in_executor(
+                    None, audio_transformation.preprocess_audio, audio_bytes
+                )
+            except Exception as e:
+                logging.error(f"Error during audio preprocessing: {e}")
+                yield f"data: {json.dumps({'stage': 'preprocessing', 'status': 'error', 'error': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            if cleaned_audio is None:
+                yield f"data: {json.dumps({'stage': 'preprocessing', 'status': 'error', 'error': 'Preprocessed audio is empty'})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            yield f"data: {json.dumps({'stage': 'preprocessing', 'status': 'done'})}\n\n"
+
             # Acquire semaphore to prevent CPU/GPU starvation
             async with TRANSCRIPTION_SEMAPHORE:
                 meeting_obj = MeetingProcessor()
@@ -85,8 +102,6 @@ def handleMeetingGeneration(request, audio_bytes, is_department_wide):
 
         return StreamingResponse(stream_pipeline(), media_type="text/event-stream")
 
-    except HTTPException:
-        raise
     except Exception as e:
         raise CustomException(e, sys)
 
