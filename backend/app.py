@@ -125,6 +125,9 @@ frontend_path = os.path.join(BASE_DIR, "frontend")
 
 @app.get("/")
 async def root():
-    return FileResponse(os.path.join(frontend_path, "index.html"))
+    if os.path.exists(os.path.join(frontend_path, "index.html")):
+        return FileResponse(os.path.join(frontend_path, "index.html"))
+    return {"status": "ok", "message": "API is running. Frontend is served by Vercel."}
 
-app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+if os.path.exists(frontend_path):
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
