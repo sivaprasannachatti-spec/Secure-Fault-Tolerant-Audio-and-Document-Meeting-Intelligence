@@ -36,6 +36,7 @@ class MeetingProcessor:
                 
         with ThreadPoolExecutor(max_workers=1) as executor:
             executor.submit(run_trans)
+            transcription_error = None
             while True:
                 try:
                     status, val = trans_queue.get(timeout=5.0)
@@ -43,10 +44,18 @@ class MeetingProcessor:
                         result = val
                         break
                     else:
-                        raise val
+                        transcription_error = val
+                        break
                 except queue.Empty:
                     # Yield a keep-alive event to keep the connection open
                     yield f"data: {json.dumps({'stage': 'transcription', 'status': 'in_progress', 'keep_alive': True})}\n\n"
+        
+        if transcription_error:
+            error_msg = str(transcription_error)
+            logging.error(f"❌ Transcription failed: {error_msg}")
+            yield f"data: {json.dumps({'stage': 'transcription', 'status': 'error', 'error': error_msg})}\n\n"
+            yield f"data: {json.dumps({'stage': 'complete', 'final_report': ''})}\n\n"
+            return
                     
         state.update(result)
         yield f"data: {json.dumps({'stage': 'transcription', 'status': 'done'})}\n\n"

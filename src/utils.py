@@ -42,7 +42,7 @@ def convert_audio(state):
         
         if not audio_bytes:
             print("❌ Error: No audio bytes provided in state.")
-            return {"converted_audio": "ERROR: No audio bytes found"}
+            raise Exception("No audio bytes found in state. Please upload a valid audio file.")
             
         logging.info("🎤 Sending audio to AssemblyAI/Deepgram orchestrator...")
         
@@ -61,7 +61,12 @@ def convert_audio(state):
                 
         except Exception as e:
             logging.error(f"⚠️ ASR service failed: {e}")
-            return {"converted_audio": f"ERROR: {str(e)}"}
+            raise Exception(f"Audio transcription failed: {str(e)}")
+        
+        # Guard against empty transcripts (e.g. silence-only audio)
+        if not final_transcript or not final_transcript.strip():
+            logging.warning("⚠️ ASR returned an empty transcript.")
+            raise Exception("The audio file could not be transcribed. It may be silent, corrupted, or in an unsupported format.")
             
         logging.info("✅ Transcription & Diarization Complete.")
         return {"converted_audio": final_transcript}
@@ -69,7 +74,7 @@ def convert_audio(state):
     except Exception as e:
         print(f"❌ Error in convert_audio: {str(e)}")
         traceback.print_exc()
-        return {"converted_audio": f"ERROR: {str(e)}"}
+        raise
     
 def generate_summary(state):
     try:
