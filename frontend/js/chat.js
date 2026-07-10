@@ -1168,14 +1168,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         activeTimerInterval = startThinkingTimer(timerElement);
 
         try {
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('is_department_wide', isDepartmentWide);
+            // Step 1: Get signed upload URL from backend
+            const urlRes = await fetch(`${API_BASE_URL}/chat/getUploadUrl?filename=${encodeURIComponent(file.name)}`, {
+                credentials: 'include'
+            });
+            if (!urlRes.ok) throw new Error("Failed to get upload URL");
+            const { signed_url, path } = await urlRes.json();
 
+            // Step 2: Upload directly to Supabase Storage
+            const uploadRes = await fetch(signed_url, {
+                method: 'PUT',
+                body: file
+            });
+            if (!uploadRes.ok) throw new Error("Failed to upload file to storage");
+
+            // Step 3: Tell backend to start processing
             const res = await fetch(`${API_BASE_URL}/chat/fileUpload`, {
                 method: 'POST',
                 credentials: 'include',
-                body: formData
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    file_path: path,
+                    is_department_wide: isDepartmentWide
+                })
             });
 
             if (!res.ok) {
@@ -1403,14 +1418,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         activeTimerInterval = startDocumentThinkingTimer(timerElement);
 
         try {
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('is_department_wide', isDepartmentWide);
+            // Step 1: Get signed upload URL from backend
+            const urlRes = await fetch(`${API_BASE_URL}/documents/getUploadUrl?filename=${encodeURIComponent(file.name)}`, {
+                credentials: 'include'
+            });
+            if (!urlRes.ok) throw new Error("Failed to get upload URL");
+            const { signed_url, path } = await urlRes.json();
 
+            // Step 2: Upload directly to Supabase Storage
+            const uploadRes = await fetch(signed_url, {
+                method: 'PUT',
+                body: file
+            });
+            if (!uploadRes.ok) throw new Error("Failed to upload file to storage");
+
+            // Step 3: Tell backend to start processing
             const res = await fetch(`${API_BASE_URL}/documents/upload`, {
                 method: 'POST',
                 credentials: 'include',
-                body: formData
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    file_path: path,
+                    is_department_wide: isDepartmentWide
+                })
             });
 
             if (!res.ok) {

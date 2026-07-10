@@ -31,7 +31,7 @@ from backend.utils.user_utils import isOnline
 from src.components.document_processor import DocumentProcessor
 
 
-def handleDocumentGeneration(request, file_bytes, file_type, is_department_wide):
+def handleDocumentGeneration(request, file_path, is_department_wide):
     """Orchestrates the complete document processing pipeline with SSE streaming."""
     try:
         online = isOnline()
@@ -39,6 +39,15 @@ def handleDocumentGeneration(request, file_bytes, file_type, is_department_wide)
         team_id = request.state.user.get('team_id')
 
         def stream_pipeline():
+            import os
+            # Download file bytes from Supabase
+            res = supabase.storage.from_("workspace-files").download(file_path)
+            file_bytes = res
+            
+            # Extract file_type from file_path
+            _, ext = os.path.splitext(file_path)
+            file_type = ext.lower()
+            
             processor = DocumentProcessor()
             final_report = None
             tree_json = None

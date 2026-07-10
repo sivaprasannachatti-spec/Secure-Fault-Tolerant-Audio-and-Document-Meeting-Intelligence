@@ -41,6 +41,13 @@ class DocumentNewChat(BaseModel):
 class DocumentChat(BaseModel):
     query: Annotated[str, Field(description="The query of the user")]
 
+import uuid
+from backend.models.DB_Client import supabase
+
+class DocumentUploadRequest(BaseModel):
+    file_path: str
+    is_department_wide: bool
+
 
 def _get_file_extension(filename: str) -> str:
     """Extracts and validates the file extension."""
@@ -48,42 +55,43 @@ def _get_file_extension(filename: str) -> str:
     return ext.lower()
 
 
+@document_notes_router.get("/getUploadUrl", dependencies=[Depends(verifyJWT)])
+def getUploadUrl(filename: str):
+    try:
+        path = f"documents/{uuid.uuid4()}-{filename}"
+        res = supabase.storage.from_("workspace-files").create_signed_upload_url(path)
+        return {"signed_url": res.get('signedUrl', res.get('signed_url')), "path": path}
+    except Exception as e:
+        raise CustomException(e, sys)
+
+
+@document_notes_router.post("/fileUpload", dependencies=[Depends(verifyJWT)])
+def fileUpload(
+    request: Request,
+    body: DocumentUploadRequest
+):
+    try:
+        return handleDocumentGeneration(request=request, file_path=body.file_path, is_department_wide=body.is_department_wide)
+    except Exception as e:
+        raise CustomException(e, sys)
+
+
 @document_notes_router.post("/upload", dependencies=[Depends(verifyJWT)])
 def documentUpload(
     request: Request,
-    file: UploadFile = File(...),
-    is_department_wide: bool = Form(False)
+    body: DocumentUploadRequest
 ):
     """
-    Accepts document files (.pdf, .docx, .txt, .md) and initiates the 
+    Accepts document file paths from Supabase and initiates the 
     Vectorless RAG pipeline. Returns an SSE stream.
     """
     try:
-        # File type validation
-        file_ext = _get_file_extension(file.filename)
-        
-        if file_ext not in ALLOWED_DOCUMENT_EXTENSIONS:
-            # Check if it's an audio file being uploaded in the wrong workspace
-            if file.content_type and file.content_type.startswith("audio/"):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Audio files cannot be uploaded in Meeting Notes workspace. Please use the Audio workspace."
-                )
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type '{file_ext}'. Supported formats: PDF, DOCX, TXT, MD."
-            )
-
-        file_bytes = file.file.read()
-        file_type = file_ext.strip('.')  # Remove the dot: '.pdf' -> 'pdf'
-        
-        logging.info(f"📄 Document upload received: {file.filename} ({file_type})")
+        logging.info(f"📄 Document upload received from Supabase: {body.file_path}")
         
         return handleDocumentGeneration(
             request=request,
-            file_bytes=file_bytes,
-            file_type=file_type,
-            is_department_wide=is_department_wide
+            file_path=body.file_path,
+            is_department_wide=body.is_department_wide
         )
     except HTTPException:
         raise

@@ -19,27 +19,29 @@ class NewChat(BaseModel):
 class Chat(BaseModel):
     query: Annotated[str, Field(description="The query of the user")]
 
+import uuid
+from backend.models.DB_Client import supabase
+
+class AudioUploadRequest(BaseModel):
+    file_path: str
+    is_department_wide: bool
+
+@chat_router.get("/getUploadUrl", dependencies=[Depends(verifyJWT)])
+def getUploadUrl(filename: str):
+    try:
+        path = f"audio/{uuid.uuid4()}-{filename}"
+        res = supabase.storage.from_("workspace-files").create_signed_upload_url(path)
+        return {"signed_url": res['signedUrl'], "path": path} # Supabase JS returns signedUrl, python usually too, but let's just return what they gave us
+    except Exception as e:
+        raise CustomException(e, sys)
+
 @chat_router.post("/fileUpload", dependencies=[Depends(verifyJWT)])
 def fileUpload(
     request: Request,
-    file: UploadFile = File(...),
-    is_department_wide: bool = Form(False)
+    body: AudioUploadRequest
 ):
     try:
-        # Strict validation: Only audio files allowed in this workspace
-        if not file.content_type.startswith("audio/"):
-            # Check if it's a document being uploaded in the wrong workspace
-            doc_exts = {'.pdf', '.docx', '.txt', '.md'}
-            import os
-            _, ext = os.path.splitext(file.filename)
-            if ext.lower() in doc_exts:
-                raise HTTPException(
-                    status_code=400, 
-                    detail="Documents cannot be uploaded in the Audio workspace. Please use the 'Meeting Notes' workspace."
-                )
-            raise HTTPException(status_code=400, detail="Only audio files (MP3, WAV, M4A) are allowed in this workspace.")
-        audio_bytes = file.file.read()
-        return handleMeetingGeneration(request=request, audio_bytes=audio_bytes, is_department_wide=is_department_wide)
+        return handleMeetingGeneration(request=request, file_path=body.file_path, is_department_wide=body.is_department_wide)
     except Exception as e:
         raise CustomException(e, sys)
 

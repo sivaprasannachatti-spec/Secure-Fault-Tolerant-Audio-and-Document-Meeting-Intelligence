@@ -23,7 +23,7 @@ import asyncio
 # This ensures the server remains responsive even under heavy upload load.
 TRANSCRIPTION_SEMAPHORE = asyncio.Semaphore(1)
 
-def handleMeetingGeneration(request, audio_bytes, is_department_wide):
+def handleMeetingGeneration(request, file_path, is_department_wide):
     try:
         dept_id = request.state.user['dept_id']
         team_id = request.state.user.get('team_id')
@@ -37,6 +37,10 @@ def handleMeetingGeneration(request, audio_bytes, is_department_wide):
             yield f"data: {json.dumps({'stage': 'preprocessing', 'status': 'in_progress'})}\n\n"
             
             try:
+                # Download audio bytes from Supabase
+                res = supabase.storage.from_("workspace-files").download(file_path)
+                audio_bytes = res
+                
                 # Run preprocessing in a thread pool to avoid blocking the ASGI server
                 loop = asyncio.get_running_loop()
                 audio_transformation = DataTransformation()
