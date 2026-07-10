@@ -321,17 +321,20 @@ def handleGettingOldChat(chat_id, request, limit=None, before_id=None):
     except Exception as e:
         raise CustomException(e, sys)
 
-def handleGetAllChats(request):
+def handleGetAllChats(request, background_tasks=None):
     try:
         online = isOnline()
         user_id = request.state.user['id']
         
         if online:
-            # Check for any pending offline data and sync it
-            try:
-                sync_offline_data_to_supabase()
-            except Exception as sync_e:
-                logging.warning(f"Background sync failed: {sync_e}")
+            # Check for any pending offline data and sync it in the background so it doesn't block loading
+            if background_tasks:
+                background_tasks.add_task(sync_offline_data_to_supabase)
+            else:
+                try:
+                    sync_offline_data_to_supabase()
+                except Exception as sync_e:
+                    logging.warning(f"Background sync failed: {sync_e}")
 
             try:
                 response = (
