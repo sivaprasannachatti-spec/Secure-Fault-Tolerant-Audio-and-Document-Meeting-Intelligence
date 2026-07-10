@@ -77,7 +77,8 @@ async def lifespan(app: FastAPI):
     print("\n========= REGISTERED ROUTES =========")
     for route in app.routes:
         methods = getattr(route, "methods", {"GET"})
-        print(f"{list(methods)} {route.path}")
+        path = getattr(route, "path", getattr(route, "name", str(route)))
+        print(f"{list(methods)} {path}")
     print("=====================================\n")
 
     yield
