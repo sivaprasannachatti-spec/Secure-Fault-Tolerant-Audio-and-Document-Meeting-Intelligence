@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, AIMessage
 from langchain_core.outputs import ChatResult, ChatGeneration
+from typing import List, Optional, Any
 
 HF_AVAILABLE = True
 

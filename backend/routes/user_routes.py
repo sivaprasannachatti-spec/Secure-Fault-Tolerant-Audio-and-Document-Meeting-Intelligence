@@ -2,7 +2,7 @@ import sys
 
 from fastapi import APIRouter, Request, Response, Depends, HTTPException
 from pydantic import BaseModel, Field
-from typing import Annotated
+from typing import Annotated, List
 from src.exception import CustomException
 from src.logger import logging
 from backend.controllers.user_controllers import handleSignupUser, handleLoginUser, handleLogoutUser, handleAccountDeletion
